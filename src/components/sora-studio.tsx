@@ -442,15 +442,15 @@ export function SoraStudio() {
                     </div>
                   ) : null}
 
-                  {item.localVideoUrl ? (
+                  {item.videoUrl ? (
                     <div className="asset-block">
                       <div className="asset-header">
                         <span>Resultat video</span>
-                        <a href={item.localVideoUrl} rel="noreferrer" target="_blank">
+                        <a href={item.videoUrl} rel="noreferrer" target="_blank">
                           Ouvrir le MP4
                         </a>
                       </div>
-                      <video className="video-preview" controls playsInline preload="metadata" src={item.localVideoUrl} />
+                      <video className="video-preview" controls playsInline preload="metadata" src={item.videoUrl} />
                     </div>
                   ) : null}
 
