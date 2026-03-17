@@ -90,3 +90,23 @@ export async function downloadRemoteVideo(videoId: string) {
 
   return response.arrayBuffer();
 }
+
+export async function createEditJob(sourceVideoId: string, prompt: string) {
+  const response = await fetch(`${OPENAI_API_BASE_URL}/videos/edits`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${getOpenAiApiKey()}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      video: { id: sourceVideoId },
+      prompt,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response));
+  }
+
+  return (await response.json()) as RemoteVideoJob;
+}

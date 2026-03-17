@@ -6,11 +6,13 @@ import {
   MAX_BATCH_SIZE,
   VERTICAL_SIZE_OPTIONS,
 } from "@/lib/sora/config";
+import { readRecord, readRecords, upsertRecord, upsertRecords } from "@/lib/sora/db";
 import { hasOpenAiApiKey } from "@/lib/sora/env";
-import { prepareReferenceImage, prepareReferenceImageFromPath, saveGeneratedVideo } from "@/lib/sora/media";
-import { createRemoteVideoJob, downloadRemoteVideo, retrieveRemoteVideoJob } from "@/lib/sora/openai";
-import { readGenerationRecords, upsertGenerationRecord, upsertGenerationRecords } from "@/lib/sora/store";
-import type { CreateGenerationInput, GenerationRecord, GenerationStatus, SoraModel, VerticalSize } from "@/lib/sora/types";
+import { normalizeStatus } from "@/lib/sora/mapper";
+import { prepareReferenceImage, prepareReferenceImageFromPath } from "@/lib/sora/media";
+import { createEditJob, createRemoteVideoJob, downloadRemoteVideo, retrieveRemoteVideoJob } from "@/lib/sora/openai";
+import { uploadImage, uploadVideo } from "@/lib/sora/storage";
+import type { CreateGenerationInput, GenerationRecord, RemoteVideoJob, SoraModel, VerticalSize } from "@/lib/sora/types";
 import { clamp, nowIsoString, toIsoTimestamp } from "@/lib/sora/utils";
 
 function isSupportedSeconds(seconds: number) {
@@ -25,56 +27,38 @@ function isSupportedModel(model: string): model is SoraModel {
   return model === "sora-2" || model === "sora-2-pro";
 }
 
-function normalizeStatus(value: string | undefined): GenerationStatus {
-  if (value === "queued" || value === "in_progress" || value === "completed" || value === "failed") {
-    return value;
-  }
-
-  return "unknown";
-}
-
 function mapRemoteJobToRecord(
-  remoteJob: {
-    id: string;
-    status?: string;
-    progress_percent?: number;
-    created_at?: number | string;
-    completed_at?: number | string;
-    expires_at?: number | string;
-    error?: {
-      message?: string;
-    };
-  },
+  remoteJob: RemoteVideoJob,
   existing: Omit<GenerationRecord, "status" | "progressPercent" | "updatedAt" | "errorMessage">,
-) {
+): GenerationRecord {
   return {
     ...existing,
     status: normalizeStatus(remoteJob.status),
     progressPercent:
       remoteJob.progress_percent ??
-      (remoteJob.status === "completed" ? 100 : remoteJob.status === "failed" ? 0 : 0),
+      (remoteJob.status === "completed" ? 100 : 0),
     errorMessage: remoteJob.error?.message,
     updatedAt: nowIsoString(),
     remoteCreatedAt: toIsoTimestamp(remoteJob.created_at) ?? existing.remoteCreatedAt,
     remoteCompletedAt: toIsoTimestamp(remoteJob.completed_at),
     remoteExpiresAt: toIsoTimestamp(remoteJob.expires_at),
-  } satisfies GenerationRecord;
+  };
 }
 
-async function ensureGeneratedVideo(record: GenerationRecord) {
-  if (record.status !== "completed" || record.localVideoUrl) {
+async function ensureVideoUploaded(record: GenerationRecord): Promise<GenerationRecord> {
+  if (record.status !== "completed" || record.videoUrl) {
     return record;
   }
 
   const videoBuffer = await downloadRemoteVideo(record.id);
-  const savedVideo = await saveGeneratedVideo(record.id, videoBuffer);
+  const videoUrl = await uploadVideo(record.id, videoBuffer);
 
   return {
     ...record,
-    localVideoUrl: savedVideo.localUrl,
-    localVideoFileName: savedVideo.fileName,
+    videoUrl,
+    videoFileName: `${record.id}.mp4`,
     updatedAt: nowIsoString(),
-  } satisfies GenerationRecord;
+  };
 }
 
 export async function createGenerations(input: CreateGenerationInput) {
@@ -100,24 +84,31 @@ export async function createGenerations(input: CreateGenerationInput) {
     throw new Error("Format vertical non pris en charge.");
   }
 
+  // Upload reference image to Supabase Storage if provided
+  let imageUrl: string | undefined;
   const referenceImage = input.referenceImage;
+  if (referenceImage) {
+    imageUrl = await uploadImage(referenceImage.buffer, referenceImage.fileName);
+  }
+
   const baseRecord = {
     prompt,
     model,
     seconds,
     size,
     inputMode: referenceImage ? ("text_plus_image" as const) : ("text" as const),
-    inputImageUrl: referenceImage?.localUrl,
+    inputImageUrl: imageUrl,
     inputImageOriginalName: referenceImage?.originalName,
     inputImageWidth: referenceImage?.width,
     inputImageHeight: referenceImage?.height,
-    localVideoUrl: undefined,
-    localVideoFileName: undefined,
+    videoUrl: undefined,
+    videoFileName: undefined,
     createdAt: nowIsoString(),
-    updatedAt: nowIsoString(),
     remoteCreatedAt: undefined,
     remoteCompletedAt: undefined,
     remoteExpiresAt: undefined,
+    sourceVideoId: undefined,
+    editPrompt: undefined,
   };
 
   const createdJobs = await Promise.all(
@@ -137,7 +128,7 @@ export async function createGenerations(input: CreateGenerationInput) {
     }),
   );
 
-  await upsertGenerationRecords(createdJobs);
+  await upsertRecords(createdJobs);
   return createdJobs.toSorted((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
@@ -187,16 +178,58 @@ export async function createGenerationsFromCli(input: {
   });
 }
 
-export async function refreshGeneration(record: GenerationRecord) {
+export async function editGeneration(sourceId: string, editPrompt: string) {
+  const source = await readRecord(sourceId);
+
+  if (source.status !== "completed") {
+    throw new Error("Seules les generations terminees peuvent etre editees.");
+  }
+
+  const remoteJob = await createEditJob(source.id, editPrompt);
+
+  const newRecord = mapRemoteJobToRecord(remoteJob, {
+    id: remoteJob.id,
+    prompt: source.prompt,
+    model: source.model,
+    seconds: source.seconds,
+    size: source.size,
+    inputMode: source.inputMode,
+    inputImageUrl: source.inputImageUrl,
+    inputImageOriginalName: source.inputImageOriginalName,
+    inputImageWidth: source.inputImageWidth,
+    inputImageHeight: source.inputImageHeight,
+    videoUrl: undefined,
+    videoFileName: undefined,
+    createdAt: nowIsoString(),
+    remoteCreatedAt: undefined,
+    remoteCompletedAt: undefined,
+    remoteExpiresAt: undefined,
+    sourceVideoId: source.id,
+    editPrompt,
+  });
+
+  await upsertRecord(newRecord);
+  return newRecord;
+}
+
+export async function refreshGeneration(record: GenerationRecord): Promise<GenerationRecord> {
   const remoteJob = await retrieveRemoteVideoJob(record.id);
   const refreshed = mapRemoteJobToRecord(remoteJob, record);
-  const withVideoIfNeeded = await ensureGeneratedVideo(refreshed);
-  await upsertGenerationRecord(withVideoIfNeeded);
-  return withVideoIfNeeded;
+
+  let withVideo: GenerationRecord;
+  try {
+    withVideo = await ensureVideoUploaded(refreshed);
+  } catch {
+    // Video download/upload failed — keep status update, retry video on next poll
+    withVideo = refreshed;
+  }
+
+  await upsertRecord(withVideo);
+  return withVideo;
 }
 
 export async function listGenerations(options?: { refresh?: boolean }) {
-  const records = await readGenerationRecords();
+  const records = await readRecords();
 
   if (!options?.refresh || !hasOpenAiApiKey()) {
     return records;
