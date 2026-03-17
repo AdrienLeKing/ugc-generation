@@ -24,21 +24,48 @@ export type GenerationRecord = {
   inputImageOriginalName?: string;
   inputImageWidth?: number;
   inputImageHeight?: number;
-  localVideoUrl?: string;
-  localVideoFileName?: string;
+  videoUrl?: string;
+  videoFileName?: string;
   errorMessage?: string;
   createdAt: string;
   updatedAt: string;
   remoteCreatedAt?: string;
   remoteCompletedAt?: string;
   remoteExpiresAt?: string;
+  sourceVideoId?: string;
+  editPrompt?: string;
 };
 
-export type PreparedReferenceImage = {
+export type GenerationRow = {
+  id: string;
+  prompt: string;
+  model: string;
+  seconds: number;
+  size: string;
+  status: string;
+  progress_percent: number;
+  input_mode: string;
+  input_image_url: string | null;
+  input_image_original_name: string | null;
+  input_image_width: number | null;
+  input_image_height: number | null;
+  video_url: string | null;
+  video_file_name: string | null;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+  remote_created_at: string | null;
+  remote_completed_at: string | null;
+  remote_expires_at: string | null;
+  source_video_id: string | null;
+  edit_prompt: string | null;
+};
+
+export type PreparedImage = {
   buffer: Buffer;
   mimeType: string;
   originalName: string;
-  localUrl: string;
+  fileName: string;
   width: number;
   height: number;
 };
@@ -49,7 +76,7 @@ export type CreateGenerationInput = {
   seconds: number;
   size: VerticalSize;
   count: number;
-  referenceImage?: PreparedReferenceImage;
+  referenceImage?: PreparedImage;
 };
 
 export type RemoteVideoJob = {
