@@ -262,6 +262,7 @@ export function SoraStudio() {
   const selectedDemo = demos.find((demo) => demo.id === selectedDemoId) ?? null;
   const activeCount = items.filter((item) => item.status === "queued" || item.status === "in_progress").length;
   const completedHooks = items.filter((item) => item.status === "completed");
+  const recentHooks = items.slice(0, 6);
   const readyStep3 = isStep3Unlocked(selectedHook);
 
   function applyDashboardPayload(payload: DashboardResponse) {
@@ -397,17 +398,6 @@ export function SoraStudio() {
 
     void refreshDemoLibrary(false);
   }, [selectedStep, readyStep3]);
-
-  useEffect(() => {
-    if (!selectedHook && selectedStep !== 1) {
-      setSelectedStep(1);
-      return;
-    }
-
-    if (selectedHook && selectedStep > stepForHook(selectedHook)) {
-      setSelectedStep(stepForHook(selectedHook));
-    }
-  }, [selectedHook, selectedStep]);
 
   function handleImageChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0] ?? null;
@@ -755,18 +745,14 @@ export function SoraStudio() {
 
             <div className="stepper-track">
               {stepTitles.map((step) => {
-                const locked = step.step === 3 && !readyStep3;
                 const active = selectedStep === step.step;
                 const reached = selectedStep > step.step || active;
 
                 return (
                   <button
-                    className={`step-card ${active ? "is-active" : ""} ${locked ? "is-locked" : ""}`}
+                    className={`step-card ${active ? "is-active" : ""}`}
                     key={step.step}
-                    onClick={() => {
-                      if (locked) return;
-                      setSelectedStep(step.step);
-                    }}
+                    onClick={() => setSelectedStep(step.step)}
                     type="button"
                   >
                     <span className={`step-index ${reached ? "is-reached" : ""}`}>{step.step}</span>
@@ -924,6 +910,88 @@ export function SoraStudio() {
                   <p>Un hook termine ne part pas vers ElevenLabs tant qu&apos;il n&apos;est pas valide.</p>
                 </article>
               </div>
+
+              <section className="subpanel">
+                <div className="subpanel-header">
+                  <div>
+                    <h3>Hooks créés</h3>
+                    <p>Les hooks apparaissent ici dès qu&apos;ils sont lancés, même pendant la génération.</p>
+                  </div>
+                  <span className="badge badge-neutral">{items.length} hooks</span>
+                </div>
+
+                <div className="hook-catalog">
+                  {recentHooks.length === 0 ? (
+                    <div className="empty-state compact-empty">
+                      <h3>Aucun hook pour le moment</h3>
+                      <p>Le premier hook lancé apparaîtra ici avec son statut et son aperçu.</p>
+                    </div>
+                  ) : (
+                    recentHooks.map((item) => (
+                      <article
+                        className={`hook-card ${selectedHookId === item.id ? "is-selected" : ""}`}
+                        key={item.id}
+                      >
+                        <div className="hook-card-head">
+                          <div>
+                            <span className="eyebrow">{modelLabel(item.model)} · {item.seconds}s</span>
+                            <h3>{copyForHookCard(item)}</h3>
+                          </div>
+                          <div className="hook-card-badges">
+                            <span className={`badge badge-${generationTone(item.status)}`}>
+                              {hookStatusLabels[item.status]}
+                            </span>
+                            <span className={`badge badge-${approvalTone(item.approvalStatus)}`}>
+                              {approvalLabels[item.approvalStatus]}
+                            </span>
+                          </div>
+                        </div>
+
+                        <p className="hook-card-scene">{item.sceneDescription ?? "Pas de description de scene."}</p>
+
+                        {item.videoUrl ? (
+                          <video
+                            className="video-preview compact-video"
+                            controls
+                            playsInline
+                            preload="metadata"
+                            src={item.videoUrl}
+                          />
+                        ) : (
+                          <div className="progress-rail compact-progress">
+                            <div
+                              className="progress-bar"
+                              style={{ width: `${Math.max(item.progressPercent, item.status === "completed" ? 100 : 8)}%` }}
+                            />
+                          </div>
+                        )}
+
+                        <div className="hook-card-footer">
+                          <small>
+                            {item.status === "completed"
+                              ? `Prêt le ${formatDate(item.updatedAt)}`
+                              : `Créé le ${formatDate(item.createdAt)}`}
+                          </small>
+                          <div className="hook-card-actions">
+                            <button className="secondary-button compact-button" onClick={() => focusHook(item)} type="button">
+                              {item.status === "completed" ? "Voir ce hook" : "Suivre ce hook"}
+                            </button>
+                            <button
+                              className="secondary-button compact-button"
+                              onClick={() => setSelectedStep(item.status === "completed" ? 2 : 1)}
+                              type="button"
+                            >
+                              {item.status === "completed" ? "Aller à l’étape 2" : "Rester en étape 1"}
+                            </button>
+                          </div>
+                        </div>
+
+                        {item.errorMessage ? <p className="error-inline">{item.errorMessage}</p> : null}
+                      </article>
+                    ))
+                  )}
+                </div>
+              </section>
             </section>
           ) : null}
 
