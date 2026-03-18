@@ -14,11 +14,14 @@ import {
 import { extractAudioFromMp4 } from "@/lib/sora/audio";
 import {
   insertDemoAsset,
+  insertPersona,
   readDemoAsset,
   readDemoAssets,
+  readPersonas,
   readRecord,
   readRecords,
   updateDemoAsset,
+  updatePersona,
   upsertRecord,
   upsertRecords,
 } from "@/lib/sora/db";
@@ -28,18 +31,19 @@ import { buildHookPrompt } from "@/lib/sora/hook-presets";
 import { normalizeStatus } from "@/lib/sora/mapper";
 import { prepareReferenceImage, prepareReferenceImageFromPath } from "@/lib/sora/media";
 import { createEditJob, createRemoteVideoJob, downloadRemoteVideo, retrieveRemoteVideoJob } from "@/lib/sora/openai";
-import { uploadAudio, uploadDemoVideo, uploadFinalVideo, uploadImage, uploadVideo } from "@/lib/sora/storage";
+import { uploadAudio, uploadDemoVideo, uploadFinalVideo, uploadImage, uploadPersonaPhoto, uploadVideo } from "@/lib/sora/storage";
 import type {
   CreateGenerationInput,
   DemoAsset,
   ElevenLabsVoiceSettings,
   GenerationRecord,
+  Persona,
   RemoteVideoJob,
   SoraModel,
   VerticalSize,
 } from "@/lib/sora/types";
 import { nowIsoString, sanitizeFileName, toIsoTimestamp } from "@/lib/sora/utils";
-import { probeMediaDuration, renderDemoWithVoiceover } from "@/lib/sora/video";
+import { concatenateVideos, probeMediaDuration, renderDemoWithVoiceover } from "@/lib/sora/video";
 
 function isSupportedSeconds(seconds: number) {
   return DURATION_OPTIONS.some((option) => option.value === seconds);
@@ -218,6 +222,7 @@ export async function createGenerations(input: CreateGenerationInput & { userId?
   const size = DEFAULT_SIZE;
   const referenceImage = input.referenceImage;
   const userId = input.userId;
+  const personaId = input.personaId;
 
   if (!spokenText) {
     throw new Error("Le texte prononce est obligatoire.");
@@ -276,6 +281,7 @@ export async function createGenerations(input: CreateGenerationInput & { userId?
     remoteExpiresAt: undefined,
     sourceVideoId: undefined,
     editPrompt: undefined,
+    personaId,
   };
 
   const remoteJob = await createRemoteVideoJob({
@@ -303,6 +309,7 @@ export async function createGenerationsFromFormData(formData: FormData, userId?:
   const model = String(formData.get("model") || DEFAULT_MODEL);
   const seconds = Number(formData.get("seconds") || DEFAULT_DURATION_SECONDS);
   const maybeFile = formData.get("referenceImage");
+  const personaId = String(formData.get("personaId") || "") || undefined;
 
   const referenceImage =
     maybeFile instanceof File && maybeFile.size > 0
@@ -316,6 +323,7 @@ export async function createGenerationsFromFormData(formData: FormData, userId?:
     model: isSupportedModel(model) ? model : DEFAULT_MODEL,
     seconds,
     referenceImage,
+    personaId,
     userId,
   });
 }
@@ -423,7 +431,7 @@ export async function cloneGenerationVoice(
 
   const audioFormat = resolveAudioFormat(input.audio.originalName, input.audio.mimeType);
 
-  const cloneName = input.name?.trim() || `ugc-hook-${generationId}`;
+  const cloneName = (input.name?.trim() || `ugc-hook-${generationId}`).slice(0, 50);
   const description = input.description?.trim() || `Voice clone for generation ${generationId}`;
   const labels = {
     project: "ugc-generation",
@@ -817,6 +825,63 @@ export async function updateDemoAssetScript(id: string, input: { name?: string; 
   return updatedAsset;
 }
 
+export async function listPersonas(userId?: string) {
+  return readPersonas(userId);
+}
+
+export async function createPersonaFromFormData(formData: FormData, userId?: string) {
+  const name = String(formData.get("name") || "").trim();
+  const notes = String(formData.get("notes") || "").trim() || undefined;
+  const maybeFile = formData.get("photo");
+
+  if (!name) {
+    throw new Error("Le nom de la persona est obligatoire.");
+  }
+
+  if (!(maybeFile instanceof File) || maybeFile.size === 0) {
+    throw new Error("La photo de la persona est obligatoire.");
+  }
+
+  const prepared = await prepareReferenceImage(maybeFile, DEFAULT_SIZE);
+  const photoUrl = await uploadPersonaPhoto(prepared.fileName, prepared.buffer, prepared.mimeType);
+  const now = nowIsoString();
+
+  const persona: Persona = {
+    id: randomUUID(),
+    userId,
+    name,
+    photoUrl,
+    photoFileName: prepared.fileName,
+    photoWidth: prepared.width,
+    photoHeight: prepared.height,
+    notes,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  await insertPersona(persona);
+  return persona;
+}
+
+export async function updatePersonaDetails(id: string, input: { name?: string; notes?: string }) {
+  const existing = await readPersonas();
+  const persona = existing.find((p) => p.id === id);
+
+  if (!persona) {
+    throw new Error(`Persona introuvable (${id}).`);
+  }
+
+  const updated: Persona = {
+    ...persona,
+    name: input.name?.trim() || persona.name,
+    notes: input.notes?.trim() ?? persona.notes,
+    updatedAt: nowIsoString(),
+  };
+
+  await updatePersona(updated);
+  return updated;
+}
+
 export async function approveGeneration(generationId: string) {
   assertElevenLabsReady();
 
@@ -853,11 +918,11 @@ export async function approveGeneration(generationId: string) {
       }
     }
 
-    const cloneName = `ugc-hook-${generationId}`;
+    const cloneName = `ugc-hook-${generationId}`.slice(0, 50);
     const voice = await createVoiceClone({
       name: cloneName,
       description: `Approved voice clone for generation ${generationId}`,
-      labels: { project: "ugc-generation", generation_id: generationId, type: "approved_hook" },
+      labels: { project: "ugc-generation", gen_id: generationId.slice(0, 50), type: "approved_hook" },
       removeBackgroundNoise: true,
       audio: {
         buffer: hookAudioBuffer,
@@ -921,6 +986,10 @@ export async function finalizeDemoForGeneration(
     throw new Error("Validez d'abord le hook avant de lancer la demo.");
   }
 
+  if (!record.videoUrl) {
+    throw new Error("La video du hook n'est pas disponible.");
+  }
+
   if (record.voiceCloneStatus !== "ready" || !record.elevenlabsVoiceId) {
     throw new Error("La voix clonee du hook n'est pas encore prete.");
   }
@@ -957,7 +1026,11 @@ export async function finalizeDemoForGeneration(
       audio.contentType,
     );
 
-    const demoVideoBuffer = await downloadFileBuffer(demo.videoUrl, "la video de demo");
+    const [demoVideoBuffer, hookVideoBuffer] = await Promise.all([
+      downloadFileBuffer(demo.videoUrl, "la video de demo"),
+      downloadFileBuffer(record.videoUrl!, "la video du hook"),
+    ]);
+
     const voiceDuration = await probeMediaDuration(audio.buffer, voiceoverFileName);
     const demoDuration = demo.durationSeconds ?? await probeMediaDuration(demoVideoBuffer, demo.videoFileName);
 
@@ -965,7 +1038,7 @@ export async function finalizeDemoForGeneration(
       throw new Error("Le voiceover est plus long que la video de demo. Raccourcissez le texte ou choisissez une demo plus longue.");
     }
 
-    const finalBuffer = await renderDemoWithVoiceover({
+    const demoWithVoiceBuffer = await renderDemoWithVoiceover({
       demoVideo: {
         buffer: demoVideoBuffer,
         fileName: demo.videoFileName,
@@ -976,6 +1049,11 @@ export async function finalizeDemoForGeneration(
       },
       durationSeconds: demoDuration,
     });
+
+    const finalBuffer = await concatenateVideos([
+      { buffer: hookVideoBuffer, fileName: record.videoFileName ?? "hook.mp4" },
+      { buffer: demoWithVoiceBuffer, fileName: "demo-voiced.mp4" },
+    ]);
 
     const finalVideoFileName = `demo-final-${generationId}-${demo.id}.mp4`;
     const finalVideoUrl = await uploadFinalVideo(finalVideoFileName, finalBuffer);

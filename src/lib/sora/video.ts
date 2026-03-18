@@ -105,3 +105,49 @@ export async function renderDemoWithVoiceover(input: {
     return readFile(outputPath);
   });
 }
+
+export async function concatenateVideos(
+  segments: { buffer: Buffer; fileName: string }[],
+): Promise<Buffer> {
+  if (segments.length === 0) {
+    throw new Error("Aucun segment video a concatener.");
+  }
+
+  if (segments.length === 1) {
+    return segments[0].buffer;
+  }
+
+  return withTempDir(async (dir) => {
+    const inputPaths: string[] = [];
+
+    for (let i = 0; i < segments.length; i++) {
+      const segment = segments[i];
+      const segmentPath = join(dir, `seg${i}${getExtension(segment.fileName, ".mp4")}`);
+      await writeFile(segmentPath, segment.buffer);
+      inputPaths.push(segmentPath);
+    }
+
+    const listPath = join(dir, "inputs.txt");
+    const listContent = inputPaths.map((p) => `file '${p}'`).join("\n");
+    await writeFile(listPath, listContent);
+
+    const outputPath = join(dir, "concat.mp4");
+
+    await runBinary("ffmpeg", [
+      "-f",
+      "concat",
+      "-safe",
+      "0",
+      "-i",
+      listPath,
+      "-c",
+      "copy",
+      "-movflags",
+      "+faststart",
+      "-y",
+      outputPath,
+    ]);
+
+    return readFile(outputPath);
+  });
+}

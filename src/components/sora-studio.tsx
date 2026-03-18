@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { startTransition, useEffect, useEffectEvent, useRef, useState } from "react";
+import { startTransition, useCallback, useEffect, useEffectEvent, useRef, useState } from "react";
 
 import {
   DEFAULT_DURATION_SECONDS,
@@ -17,7 +17,15 @@ import {
   type HookPresetId,
 } from "@/lib/sora/hook-presets";
 import { getBrowserSupabase } from "@/lib/supabase/browser";
-import type { DemoAsset, GenerationRecord, SoraModel } from "@/lib/sora/types";
+import type { DemoAsset, GenerationRecord, Persona, SoraModel } from "@/lib/sora/types";
+
+import { useI18n, useT } from "@/lib/i18n/context";
+import type { Dictionary } from "@/lib/i18n/dictionaries";
+import { LocaleSwitcher } from "./locale-switcher";
+import { BottomNav, type TabId } from "./bottom-nav";
+import { MediaView } from "./media-view";
+import { PersonaView } from "./persona-view";
+import { SettingsView } from "./settings-view";
 
 type DashboardResponse = {
   envReady: boolean;
@@ -44,14 +52,22 @@ type DemoItemResponse = {
   item: DemoAsset;
 };
 
+type PersonaLibraryResponse = {
+  items: Persona[];
+};
+
+type PersonaItemResponse = {
+  item: Persona;
+};
+
 type ApiError = {
   error?: string;
 };
 
-type WizardStep = 1 | 2 | 3;
+type WizardStep = 1 | 2 | 3 | 4;
 
-function formatDate(date: string) {
-  return new Intl.DateTimeFormat("fr-FR", {
+function formatDate(date: string, locale: string) {
+  return new Intl.DateTimeFormat(locale === "en" ? "en-GB" : "fr-FR", {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(date));
@@ -59,7 +75,7 @@ function formatDate(date: string) {
 
 function formatDuration(seconds?: number) {
   if (!seconds || !Number.isFinite(seconds)) {
-    return "Duree inconnue";
+    return "";
   }
 
   return `${Math.round(seconds)} s`;
@@ -106,44 +122,23 @@ async function requestDemoLibrary() {
   return payload.items;
 }
 
-const stepTitles: Array<{ step: WizardStep; title: string; caption: string }> = [
-  {
-    step: 1,
-    title: "Hook",
-    caption: "Generer et choisir un hook",
-  },
-  {
-    step: 2,
-    title: "Demo",
-    caption: "Choisir une demo et preparer le texte",
-  },
-  {
-    step: 3,
-    title: "Rendu",
-    caption: "Generer et relire le MP4 final",
-  },
-];
+async function requestPersonaLibrary() {
+  const response = await fetch("/api/personas", { cache: "no-store" });
+  const payload = (await response.json()) as PersonaLibraryResponse | ApiError;
 
-const hookStatusLabels: Record<GenerationRecord["status"], string> = {
-  queued: "En file",
-  in_progress: "En cours",
-  completed: "Termine",
-  failed: "Echec",
-  unknown: "Etat inconnu",
-};
+  if (!response.ok || isApiError(payload)) {
+    throw new Error(
+      requestError(
+        isApiError(payload) ? payload : undefined,
+        "Impossible de recuperer les personas.",
+      ),
+    );
+  }
 
-const asyncStatusLabels: Record<GenerationRecord["voiceCloneStatus"], string> = {
-  idle: "En attente",
-  processing: "En cours",
-  ready: "Pret",
-  failed: "Echec",
-};
+  return payload.items;
+}
 
-const approvalLabels: Record<GenerationRecord["approvalStatus"], string> = {
-  draft: "A valider",
-  approved: "Valide",
-  rejected: "Rejete",
-};
+/* stepTitles, hookStatusLabels, asyncStatusLabels, approvalLabels moved inside SoraStudio for i18n reactivity */
 
 function modelLabel(model: SoraModel) {
   return MODEL_OPTIONS.find((option) => option.value === model)?.label ?? model;
@@ -201,6 +196,10 @@ function stepForHook(item?: GenerationRecord | null): WizardStep {
   }
 
   if (item.approvalStatus === "approved" && item.voiceCloneStatus === "ready") {
+    return 4;
+  }
+
+  if (item.approvalStatus === "approved") {
     return 3;
   }
 
@@ -211,7 +210,7 @@ function stepForHook(item?: GenerationRecord | null): WizardStep {
   return 1;
 }
 
-function isStep3Unlocked(item?: GenerationRecord | null) {
+function isRenderUnlocked(item?: GenerationRecord | null) {
   return Boolean(item && item.approvalStatus === "approved" && item.voiceCloneStatus === "ready");
 }
 
@@ -219,7 +218,7 @@ function copyForHookCard(item: GenerationRecord) {
   return item.spokenText ?? item.prompt;
 }
 
-function estimateDemoScriptFit(text: string, durationSeconds?: number) {
+function estimateDemoScriptFit(text: string, durationSeconds: number | undefined, t: Dictionary) {
   if (!durationSeconds || !text.trim()) {
     return null;
   }
@@ -227,40 +226,115 @@ function estimateDemoScriptFit(text: string, durationSeconds?: number) {
   const words = text.trim().split(/\s+/).filter(Boolean).length;
   const targetWords = durationSeconds * 2.4;
   const ratio = words / targetWords;
+  const d = Math.round(durationSeconds);
 
   if (ratio <= 0.85) {
     return {
       tone: "success" as const,
-      label: "Confortable",
-      hint: `${words} mots pour ${Math.round(durationSeconds)}s. Il reste de la marge.`,
+      label: t.studio.fitComfortable,
+      hint: t.studio.fitComfortableHint(words, d),
     };
   }
 
   if (ratio <= 1.1) {
     return {
       tone: "accent" as const,
-      label: "Dense mais jouable",
-      hint: `${words} mots pour ${Math.round(durationSeconds)}s. A surveiller.`,
+      label: t.studio.fitDense,
+      hint: t.studio.fitDenseHint(words, d),
     };
   }
 
   return {
     tone: "danger" as const,
-    label: "Probablement trop long",
-    hint: `${words} mots pour ${Math.round(durationSeconds)}s. Il faut probablement raccourcir.`,
+    label: t.studio.fitTooLong,
+    hint: t.studio.fitTooLongHint(words, d),
   };
+}
+
+function MicroFlow({
+  steps,
+  active,
+  onSelect,
+  warnings,
+}: {
+  steps: string[];
+  active: number;
+  onSelect: (index: number) => void;
+  warnings?: (string | null)[];
+}) {
+  return (
+    <div className="micro-flow">
+      {steps.map((label, i) => {
+        const warn = warnings?.[i];
+        const done = i < active && !warn;
+        const cls = [
+          "micro-flow-pill",
+          i === active ? "is-active" : "",
+          done ? "is-done" : "",
+          warn ? "is-warn" : "",
+        ]
+          .filter(Boolean)
+          .join(" ");
+
+        return (
+          <div className="micro-flow-node" key={label}>
+            <button className={cls} onClick={() => onSelect(i)} type="button">
+              <span className="micro-flow-num">{i + 1}</span>
+              {label}
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function SubStepNav({
+  current,
+  total,
+  onPrev,
+  onNext,
+  nextLabel,
+  nextDisabled,
+}: {
+  current: number;
+  total: number;
+  onPrev: () => void;
+  onNext: () => void;
+  nextLabel?: string;
+  nextDisabled?: boolean;
+}) {
+  const t = useT();
+  return (
+    <div className="substep-nav">
+      {current > 0 ? (
+        <button className="secondary-button" onClick={onPrev} type="button">
+          {t.studio.previous}
+        </button>
+      ) : (
+        <span />
+      )}
+      {current < total - 1 ? (
+        <button className="primary-button" disabled={nextDisabled} onClick={onNext} type="button">
+          {nextLabel ?? t.studio.next}
+        </button>
+      ) : null}
+    </div>
+  );
 }
 
 function InlineVideoPreview({
   src,
   className,
-  label = "Ouvrir en plein écran",
+  label,
 }: {
   src: string;
   className?: string;
   label?: string;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  const t = useT();
 
   async function handleFullscreen() {
     const video = videoRef.current;
@@ -282,7 +356,7 @@ function InlineVideoPreview({
     <div className={`video-shell ${className ?? ""}`.trim()}>
       <div className="video-shell-actions">
         <button className="secondary-button compact-button" onClick={() => void handleFullscreen()} type="button">
-          {label}
+          {label ?? t.common.openFullscreen}
         </button>
       </div>
       <video
@@ -298,12 +372,53 @@ function InlineVideoPreview({
 }
 
 export function SoraStudio() {
+  const { locale, t } = useI18n();
+
+  const presetI18n: Record<string, { name: string; badge: string; summary: string; context: string }> = {
+    selfie_handheld: { name: t.hookPresets.selfie, badge: t.hookPresets.selfieBadge, summary: t.hookPresets.selfieSummary, context: t.hookPresets.selfieContext },
+    car_dashboard: { name: t.hookPresets.carDashboard, badge: t.hookPresets.carDashboardBadge, summary: t.hookPresets.carDashboardSummary, context: t.hookPresets.carDashboardContext },
+    car_passenger: { name: t.hookPresets.carPassenger, badge: t.hookPresets.carPassengerBadge, summary: t.hookPresets.carPassengerSummary, context: t.hookPresets.carPassengerContext },
+    kitchen_counter: { name: t.hookPresets.kitchen, badge: t.hookPresets.kitchenBadge, summary: t.hookPresets.kitchenSummary, context: t.hookPresets.kitchenContext },
+    bathroom_counter: { name: t.hookPresets.bathroom, badge: t.hookPresets.bathroomBadge, summary: t.hookPresets.bathroomSummary, context: t.hookPresets.bathroomContext },
+    custom: { name: t.hookPresets.custom, badge: t.hookPresets.customBadge, summary: t.hookPresets.customSummary, context: t.hookPresets.customContext },
+  };
+
+  const stepTitles: Array<{ step: WizardStep; title: string; caption: string }> = [
+    { step: 1, title: "Hook", caption: t.studio.stepHookCaption },
+    { step: 2, title: "Demo", caption: t.studio.stepDemoCaption },
+    { step: 3, title: t.studio.stepVoice, caption: t.studio.stepVoiceCaption },
+    { step: 4, title: t.studio.stepRender, caption: t.studio.stepRenderCaption },
+  ];
+
+  const hookStatusLabels: Record<GenerationRecord["status"], string> = {
+    queued: t.status.queued,
+    in_progress: t.status.processing,
+    completed: t.status.completed,
+    failed: t.status.failed,
+    unknown: t.status.unknown,
+  };
+
+  const asyncStatusLabels: Record<GenerationRecord["voiceCloneStatus"], string> = {
+    idle: t.status.idle,
+    processing: t.status.processing,
+    ready: t.status.ready,
+    failed: t.status.failed,
+  };
+
+  const approvalLabels: Record<GenerationRecord["approvalStatus"], string> = {
+    draft: t.status.draft,
+    approved: t.status.approved,
+    rejected: t.status.rejected,
+  };
+
   const [items, setItems] = useState<GenerationRecord[]>([]);
   const [demos, setDemos] = useState<DemoAsset[]>([]);
+  const [activeTab, setActiveTab] = useState<TabId>("make");
   const [envReady, setEnvReady] = useState(false);
   const [elevenLabsReady, setElevenLabsReady] = useState(false);
   const [pollIntervalMs, setPollIntervalMs] = useState(10_000);
   const [selectedStep, setSelectedStep] = useState<WizardStep>(1);
+  const [subStep, setSubStep] = useState(0);
   const [selectedHookId, setSelectedHookId] = useState<string | null>(null);
   const [hookPresetId, setHookPresetId] = useState<HookPresetId>(DEFAULT_HOOK_PRESET_ID);
   const [spokenText, setSpokenText] = useState("");
@@ -334,8 +449,49 @@ export function SoraStudio() {
   const [editingDemoDefaultScript, setEditingDemoDefaultScript] = useState("");
   const [savingDemoEdit, setSavingDemoEdit] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [tiktokUrl, setTiktokUrl] = useState("");
+  const [transcribing, setTranscribing] = useState(false);
+  const [transcribeError, setTranscribeError] = useState<string | null>(null);
+  const [personas, setPersonas] = useState<Persona[]>([]);
+  const [loadingPersonas, setLoadingPersonas] = useState(false);
+  const [personasError, setPersonasError] = useState<string | null>(null);
+  const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(null);
+  const [creatingPersona, setCreatingPersona] = useState(false);
+  const [createPersonaError, setCreatePersonaError] = useState<string | null>(null);
+  const [showPersonaModal, setShowPersonaModal] = useState(false);
+  const [newPersonaName, setNewPersonaName] = useState("");
+  const [newPersonaNotes, setNewPersonaNotes] = useState("");
   const createDemoFormRef = useRef<HTMLFormElement | null>(null);
+  const createPersonaFormRef = useRef<HTMLFormElement | null>(null);
   const intervalRef = useRef<number | null>(null);
+  const stepperRef = useRef<HTMLDivElement | null>(null);
+
+  // sliding indicator under the active tab
+  const syncIndicator = useCallback(() => {
+    const track = stepperRef.current;
+    if (!track) return;
+    const activeTab = track.querySelector<HTMLElement>(".step-tab.is-active");
+    if (!activeTab) return;
+    track.style.setProperty("--indicator-left", `${activeTab.offsetLeft}px`);
+    track.style.setProperty("--indicator-width", `${activeTab.offsetWidth}px`);
+  }, []);
+
+  useEffect(() => {
+    syncIndicator();
+  }, [selectedStep, syncIndicator]);
+
+  useEffect(() => {
+    window.addEventListener("resize", syncIndicator);
+    return () => window.removeEventListener("resize", syncIndicator);
+  }, [syncIndicator]);
+
+  function goToStep(step: WizardStep, sub = 0) {
+    setSelectedStep(step);
+    setSubStep(sub);
+  }
+
+  const step1Subs = [t.studio.subPreset, t.studio.subTextScene, t.studio.subCreatorPhoto, t.studio.subGenerate];
+  const step2Subs = [t.studio.subChooseDemo, t.studio.subWriteText];
 
   const selectedHook = items.find((item) => item.id === selectedHookId) ?? null;
   const selectedPreset = getHookPreset(hookPresetId);
@@ -344,10 +500,11 @@ export function SoraStudio() {
   const persistedSelectedDemoId = selectedHook?.selectedDemoId ?? "";
   const persistedDemoScript = selectedHook?.demoScriptDraft ?? "";
   const selectedDemo = demos.find((demo) => demo.id === selectedDemoId) ?? null;
+  const selectedPersona = personas.find((p) => p.id === selectedPersonaId) ?? null;
   const activeCount = items.filter((item) => item.status === "queued" || item.status === "in_progress").length;
-  const readyStep3 = isStep3Unlocked(selectedHook);
+  const readyForRender = isRenderUnlocked(selectedHook);
   const historyItems = pendingHookPreview ? [pendingHookPreview, ...items] : items;
-  const demoScriptFit = estimateDemoScriptFit(demoScript, selectedDemo?.durationSeconds);
+  const demoScriptFit = estimateDemoScriptFit(demoScript, selectedDemo?.durationSeconds, t);
 
   async function handleLogout() {
     await getBrowserSupabase().auth.signOut();
@@ -379,7 +536,7 @@ export function SoraStudio() {
       const payload = await requestDashboard();
       applyDashboardPayload(payload);
     } catch (error) {
-      setDashboardError(error instanceof Error ? error.message : "Impossible de recuperer les hooks.");
+      setDashboardError(error instanceof Error ? error.message : t.studio.fetchHooksError);
     } finally {
       setRefreshing(false);
     }
@@ -394,7 +551,7 @@ export function SoraStudio() {
       const payload = await requestDashboard();
       applyDashboardPayload(payload);
     } catch (error) {
-      setDashboardError(error instanceof Error ? error.message : "Impossible de recuperer les hooks.");
+      setDashboardError(error instanceof Error ? error.message : t.studio.fetchHooksError);
     } finally {
       setRefreshing(false);
     }
@@ -411,10 +568,58 @@ export function SoraStudio() {
       setDemosError(null);
     } catch (error) {
       setDemosError(
-        error instanceof Error ? error.message : "Impossible de recuperer la bibliotheque de demos.",
+        error instanceof Error ? error.message : t.studio.fetchDemosError,
       );
     } finally {
       setLoadingDemos(false);
+    }
+  }
+
+  async function refreshPersonaLibrary(showSpinner = true) {
+    if (showSpinner) setLoadingPersonas(true);
+    try {
+      setPersonas(await requestPersonaLibrary());
+      setPersonasError(null);
+    } catch (error) {
+      setPersonasError(error instanceof Error ? error.message : t.studio.fetchPersonasError);
+    } finally {
+      setLoadingPersonas(false);
+    }
+  }
+
+  function handlePickPersona(persona: Persona) {
+    setSelectedPersonaId(persona.id);
+    setReferenceImage(null);
+    setReferencePreviewUrl(persona.photoUrl);
+  }
+
+  async function handleCreatePersona(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setCreatingPersona(true);
+    setCreatePersonaError(null);
+
+    try {
+      const formData = new FormData(event.currentTarget);
+      formData.set("name", newPersonaName);
+      if (newPersonaNotes) formData.set("notes", newPersonaNotes);
+
+      const response = await fetch("/api/personas", { method: "POST", body: formData });
+      const payload = (await response.json()) as PersonaItemResponse | ApiError;
+
+      if (!response.ok || isApiError(payload)) {
+        throw new Error(requestError(isApiError(payload) ? payload : undefined, t.studio.createPersonaError));
+      }
+
+      handlePickPersona((payload as PersonaItemResponse).item);
+      setNewPersonaName("");
+      setNewPersonaNotes("");
+      setShowPersonaModal(false);
+      createPersonaFormRef.current?.reset();
+      await refreshPersonaLibrary(false);
+    } catch (error) {
+      setCreatePersonaError(error instanceof Error ? error.message : t.studio.createPersonaError);
+    } finally {
+      setCreatingPersona(false);
     }
   }
 
@@ -474,12 +679,13 @@ export function SoraStudio() {
     }
 
     if (!demoScriptDirty && !demoScript) {
-      setDemoScript(selectedDemo.defaultScript);
+      setDemoScript(selectedHook?.spokenText || selectedDemo.defaultScript);
     }
   }, [
     selectedDemo,
     selectedHook?.selectedDemoId,
     selectedHook?.demoScriptDraft,
+    selectedHook?.spokenText,
     demoScriptDirty,
     demoScript,
   ]);
@@ -491,6 +697,10 @@ export function SoraStudio() {
 
     void refreshDemoLibrary(false);
   }, [selectedStep]);
+
+  useEffect(() => {
+    void refreshPersonaLibrary(false);
+  }, []);
 
   function handleImageChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0] ?? null;
@@ -524,10 +734,6 @@ export function SoraStudio() {
     if (!sceneDescription.trim() || sceneDescription === previousPreset.sceneStarter || isCustomHookPreset(hookPresetId)) {
       setSceneDescription(nextPreset.sceneStarter);
     }
-  }
-
-  function focusHook(item: GenerationRecord) {
-    setSelectedHookId(item.id);
   }
 
   function buildPendingHookPreview(input: { spokenText: string; sceneDescription: string }) {
@@ -576,6 +782,36 @@ export function SoraStudio() {
     } satisfies GenerationRecord;
   }
 
+  async function handleTranscribe() {
+    const url = tiktokUrl.trim();
+    if (!url) return;
+
+    setTranscribing(true);
+    setTranscribeError(null);
+
+    try {
+      const response = await fetch("/api/transcribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+
+      const payload = (await response.json()) as { text?: string; error?: string };
+
+      if (!response.ok || payload.error) {
+        throw new Error(payload.error ?? "La transcription a echoue.");
+      }
+
+      if (payload.text) {
+        setSpokenText(payload.text);
+      }
+    } catch (error) {
+      setTranscribeError(error instanceof Error ? error.message : "La transcription a echoue.");
+    } finally {
+      setTranscribing(false);
+    }
+  }
+
   async function handleHookSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSubmittingHook(true);
@@ -599,6 +835,10 @@ export function SoraStudio() {
 
       if (referenceImage) {
         formData.set("referenceImage", referenceImage);
+      }
+
+      if (selectedPersonaId) {
+        formData.set("personaId", selectedPersonaId);
       }
 
       const response = await fetch("/api/generations", {
@@ -625,16 +865,17 @@ export function SoraStudio() {
         });
       }
 
-      setSelectedStep(1);
+      goToStep(1);
       setHookPresetId(DEFAULT_HOOK_PRESET_ID);
       setSpokenText("");
+      setTiktokUrl("");
+      setTranscribeError(null);
       setSceneDescription(getHookPreset(DEFAULT_HOOK_PRESET_ID).sceneStarter);
       setReferenceImage(null);
       if (referencePreviewUrl) {
         URL.revokeObjectURL(referencePreviewUrl);
       }
       setReferencePreviewUrl(null);
-      event.currentTarget.reset();
 
       await refreshDashboard(false);
     } catch (error) {
@@ -671,14 +912,14 @@ export function SoraStudio() {
       const payload = (await response.json()) as ItemResponse | ApiError;
 
       if (!response.ok || isApiError(payload)) {
-        throw new Error(requestError(isApiError(payload) ? payload : undefined, "La validation du hook a echoue."));
+        throw new Error(requestError(isApiError(payload) ? payload : undefined, t.studio.hookApprovalFailed));
       }
 
       setSelectedHookId(payload.item.id);
-      setSelectedStep(nextStep);
+      goToStep(nextStep);
       await refreshDashboard(false);
     } catch (error) {
-      setDashboardError(error instanceof Error ? error.message : "La validation du hook a echoue.");
+      setDashboardError(error instanceof Error ? error.message : t.studio.hookApprovalFailed);
       await refreshDashboard(false);
     } finally {
       setApproveBusyId(null);
@@ -724,12 +965,12 @@ export function SoraStudio() {
       const payload = (await response.json()) as ItemResponse | ApiError;
 
       if (!response.ok || isApiError(payload)) {
-        throw new Error(requestError(isApiError(payload) ? payload : undefined, "Le rendu final a echoue."));
+        throw new Error(requestError(isApiError(payload) ? payload : undefined, t.studio.renderFailed));
       }
 
       await refreshDashboard(false);
     } catch (error) {
-      setFinalizeError(error instanceof Error ? error.message : "Le rendu final a echoue.");
+      setFinalizeError(error instanceof Error ? error.message : t.studio.renderFailed);
       await refreshDashboard(false);
     } finally {
       setFinalizingHookId(null);
@@ -831,7 +1072,7 @@ export function SoraStudio() {
 
   const canSubmitFinalDemo =
     Boolean(selectedHook) &&
-    readyStep3 &&
+    readyForRender &&
     Boolean(selectedDemoId) &&
     Boolean(demoScript.trim()) &&
     !finalizingHookId &&
@@ -839,7 +1080,7 @@ export function SoraStudio() {
 
   async function handleUseHook(item: GenerationRecord) {
     setSelectedHookId(item.id);
-    setSelectedStep(2);
+    goToStep(2);
 
     if (item.status !== "completed") {
       return;
@@ -853,437 +1094,585 @@ export function SoraStudio() {
   }
 
   return (
+    <>
     <main className="page-shell">
-      <div className="page-backdrop" />
+      <div className="page-backdrop">
+        <header className="app-header">
+          <h1>Bulk UGC</h1>
+          <LocaleSwitcher />
+        </header>
 
-      {userEmail ? (
-        <div className="user-bar">
-          <span className="user-email">{userEmail}</span>
-          <button className="logout-button" onClick={handleLogout} type="button">
-            Deconnexion
-          </button>
-        </div>
-      ) : null}
-      <header className="app-header">
-        <h1>Bulk UGC</h1>
-      </header>
+        {activeTab === "make" ? (
+        <section className="wizard-shell">
+          <div className="stepper-track" ref={stepperRef}>
+            {stepTitles.map((step) => {
+              const active = selectedStep === step.step;
 
-      <section className="wizard-shell">
+              return (
+                <button
+                  className={`step-tab ${active ? "is-active" : ""}`}
+                  key={step.step}
+                  onClick={() => goToStep(step.step)}
+                  type="button"
+                >
+                  <span className="step-num">{String(step.step).padStart(2, "0")}</span>
+                  <strong>{step.title}</strong>
+                </button>
+              );
+            })}
+          </div>
+
+          {selectedStep === 1 ? (
+            <MicroFlow
+              steps={step1Subs}
+              active={subStep}
+              onSelect={setSubStep}
+              warnings={[
+                null,
+                spokenText.trim() ? null : t.studio.textMissing,
+                null,
+                null,
+              ]}
+            />
+          ) : null}
+          {selectedStep === 2 ? (
+            <MicroFlow
+              steps={step2Subs}
+              active={subStep}
+              onSelect={setSubStep}
+              warnings={[
+                selectedDemoId ? null : t.studio.noDemo,
+                demoScript.trim() ? null : t.studio.textMissing,
+              ]}
+            />
+          ) : null}
+
+        <div className={`wizard-body ${selectedStep > 1 ? "wizard-body--full" : ""}`}>
         <div className="wizard-main">
-          <section className="panel stepper-panel">
-            <div className="panel-header">
-              <div>
-                <h2>Flux guide</h2>
-                <p>Crée, choisis puis transforme un hook en démo finale.</p>
-              </div>
-            </div>
-
-            <div className="stepper-track">
-              {stepTitles.map((step) => {
-                const active = selectedStep === step.step;
-                const reached = selectedStep > step.step || active;
-
-                return (
-                  <button
-                    className={`step-card ${active ? "is-active" : ""}`}
-                    key={step.step}
-                    onClick={() => setSelectedStep(step.step)}
-                    type="button"
-                  >
-                    <span className={`step-index ${reached ? "is-reached" : ""}`}>{step.step}</span>
-                    <strong>{step.title}</strong>
-                    <small>{step.caption}</small>
-                  </button>
-                );
-              })}
-            </div>
-          </section>
-
           {dashboardError ? <p className="error-box">{dashboardError}</p> : null}
 
           {selectedStep === 1 ? (
             <section className="panel step-panel">
-              <div className="panel-header">
-                <div>
-                  <h2>Etape 1 — Hook Sora</h2>
-                  <p>Image, texte prononce, scene et settings, puis generation du hook vertical.</p>
-                </div>
-                <span className="badge badge-neutral">Défaut: 4 secondes</span>
-              </div>
 
-              <form className="wizard-form" onSubmit={handleHookSubmit}>
-                <div className="field">
-                  <span>Preset de tournage UGC</span>
-                  <div className="preset-grid">
-                    {HOOK_PRESETS.map((preset) => {
-                      const isActive = preset.id === hookPresetId;
+              {subStep === 0 ? (
+                <div className="substep-content">
+                  <div className="field">
+                    <span>{t.studio.ugcShootingPreset}</span>
+                    <div className="preset-grid">
+                      {HOOK_PRESETS.map((preset) => {
+                        const isActive = preset.id === hookPresetId;
+                        const pi = presetI18n[preset.id];
 
-                      return (
-                        <button
-                          className={`preset-card ${isActive ? "is-active" : ""}`}
-                          key={preset.id}
-                          onClick={() => handlePresetSelect(preset.id)}
-                          title={`${preset.summary} ${preset.shootingContext}`}
-                          type="button"
-                        >
-                          <div className="preset-card-head">
-                            <strong>{preset.name}</strong>
-                            <span className="badge badge-neutral">{preset.badge}</span>
-                          </div>
-                          <div className="preset-tooltip" role="presentation">
-                            <p>{preset.summary}</p>
-                            <small>{preset.shootingContext}</small>
-                          </div>
-                        </button>
-                      );
-                    })}
+                        return (
+                          <button
+                            className={`preset-card ${isActive ? "is-active" : ""}`}
+                            key={preset.id}
+                            onClick={() => handlePresetSelect(preset.id)}
+                            title={`${pi?.summary ?? preset.summary} ${pi?.context ?? preset.shootingContext}`}
+                            type="button"
+                          >
+                            <div className="preset-card-head">
+                              <strong>{pi?.name ?? preset.name}</strong>
+                              <span className="badge badge-neutral">{pi?.badge ?? preset.badge}</span>
+                            </div>
+                            <div className="preset-tooltip" role="presentation">
+                              <p>{pi?.summary ?? preset.summary}</p>
+                              <small>{pi?.context ?? preset.shootingContext}</small>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
+                  <SubStepNav current={0} total={step1Subs.length} onPrev={() => setSubStep(0)} onNext={() => setSubStep(1)} />
                 </div>
+              ) : null}
 
-                <label className="field">
-                  <span>Texte prononcé</span>
-                  <textarea
-                    onChange={(event) => setSpokenText(event.target.value)}
-                    placeholder='Exemple: "Stop, si ta peau tiraille apres la douche, il faut voir ca."'
-                    required
-                    rows={5}
-                    value={spokenText}
-                  />
-                </label>
+              {subStep === 1 ? (
+                <div className="substep-content">
+                  <div className="field">
+                    <span>{t.studio.importFromTiktok}</span>
+                    <div className="transcribe-row">
+                      <input
+                        className="transcribe-url-input"
+                        onChange={(event) => setTiktokUrl(event.target.value)}
+                        placeholder="https://www.tiktok.com/@user/video/..."
+                        type="url"
+                        value={tiktokUrl}
+                      />
+                      <button
+                        className="secondary-button compact-button"
+                        disabled={transcribing || !tiktokUrl.trim()}
+                        onClick={() => void handleTranscribe()}
+                        type="button"
+                      >
+                        {transcribing ? <><span className="btn-spinner" />{t.studio.transcribing}</> : t.studio.transcribe}
+                      </button>
+                    </div>
+                    <small>{t.studio.tiktokHint}</small>
+                    {transcribeError ? <p className="error-inline">{transcribeError}</p> : null}
+                  </div>
 
-                {isCustomPreset ? (
                   <label className="field">
-                    <span>Preset custom</span>
+                    <span>{t.studio.spokenText}</span>
                     <textarea
-                      onChange={(event) => setSceneDescription(event.target.value)}
-                      placeholder="Decris ici la scene, le contexte, le rythme, le lieu, la lumiere et les details de tournage."
-                      required
-                      rows={4}
-                      value={sceneDescription}
+                      onChange={(event) => setSpokenText(event.target.value)}
+                      placeholder={t.studio.spokenTextPlaceholder}
+                      rows={5}
+                      value={spokenText}
                     />
-                    <small>Ce champ n&apos;apparait que pour le preset custom.</small>
-                  </label>
-                ) : null}
-
-                <div className="field-grid">
-                  <label className="field">
-                    <span>Modèle</span>
-                    <select value={model} onChange={(event) => setModel(event.target.value as SoraModel)}>
-                      {MODEL_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                    <small>{MODEL_OPTIONS.find((option) => option.value === model)?.description}</small>
                   </label>
 
-                  <label className="field">
-                    <span>Durée</span>
-                    <select value={seconds} onChange={(event) => setSeconds(Number(event.target.value))}>
-                      {DURATION_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
+                  {isCustomPreset ? (
+                    <label className="field">
+                      <span>{t.studio.customPreset}</span>
+                      <textarea
+                        onChange={(event) => setSceneDescription(event.target.value)}
+                        placeholder={t.studio.customPresetPlaceholder}
+                        rows={4}
+                        value={sceneDescription}
+                      />
+                      <small>{t.studio.customPresetHint}</small>
+                    </label>
+                  ) : null}
 
-                <label className="field">
-                  <span>Photo de la creatrice</span>
-                  <input accept="image/*" onChange={handleImageChange} type="file" />
-                  <small>Optionnel: si tu ajoutes une photo, elle sert d&apos;ancrage visuel et sera recadrée en 9:16 avant envoi à Sora.</small>
-                </label>
+                  <div className="field-grid">
+                    <label className="field">
+                      <span>{t.studio.modelLabel}</span>
+                      <select value={model} onChange={(event) => setModel(event.target.value as SoraModel)}>
+                        {MODEL_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                      <small>{MODEL_OPTIONS.find((option) => option.value === model)?.description}</small>
+                    </label>
 
-                {referencePreviewUrl ? (
-                  <div className="reference-preview">
-                    <Image
-                      alt="Apercu de l'image de reference"
-                      className="media-fill"
-                      fill
-                      sizes="(max-width: 720px) 100vw, 440px"
-                      src={referencePreviewUrl}
-                      unoptimized
-                    />
+                    <label className="field">
+                      <span>{t.studio.durationLabel}</span>
+                      <select value={seconds} onChange={(event) => setSeconds(Number(event.target.value))}>
+                        {DURATION_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                   </div>
-                ) : null}
-
-                {!envReady ? (
-                  <div className="notice-box">
-                    <strong>OpenAI n&apos;est pas configure</strong>
-                    <p>Ajoutez `OPENAI_API_KEY` dans `.env.local` pour lancer un hook.</p>
-                  </div>
-                ) : null}
-
-                <div className="form-actions">
-                  <button className="primary-button" disabled={submittingHook || !envReady} type="submit">
-                    {submittingHook ? "Generation du hook..." : "Generer le hook"}
-                  </button>
+                  <SubStepNav current={1} total={step1Subs.length} onPrev={() => setSubStep(0)} onNext={() => setSubStep(2)} nextDisabled={!spokenText.trim()} />
                 </div>
+              ) : null}
 
-                <p className="creation-counter">
-                  {activeCount > 0
-                    ? `${activeCount} création${activeCount > 1 ? "s" : ""} en cours`
-                    : "Aucune création en cours"}
-                </p>
-              </form>
+              {subStep === 2 ? (
+                <div className="substep-content">
+                  <section className="subpanel">
+                    <div className="subpanel-header">
+                      <div>
+                        <h3>{t.studio.personas}</h3>
+                        <p>{t.studio.personaLibrary}</p>
+                      </div>
+                      <button
+                        className="secondary-button compact-button"
+                        disabled={loadingPersonas}
+                        onClick={() => void refreshPersonaLibrary()}
+                        type="button"
+                      >
+                        {loadingPersonas ? t.common.loading : t.common.refresh}
+                      </button>
+                    </div>
+
+                    {personasError ? <p className="error-inline">{personasError}</p> : null}
+
+                    <div className="persona-grid">
+                      {personas.length === 0 && !loadingPersonas ? (
+                        <div className="empty-state compact-empty">
+                          <h3>{t.studio.noPersonas}</h3>
+                          <p>{t.studio.addFirstPersona}</p>
+                        </div>
+                      ) : (
+                        personas.map((persona) => {
+                          const isSelected = selectedPersonaId === persona.id;
+
+                          return (
+                            <article className={`persona-card ${isSelected ? "is-selected" : ""}`} key={persona.id}>
+                              <div className="persona-photo">
+                                <Image
+                                  alt={persona.name}
+                                  className="media-fill"
+                                  fill
+                                  sizes="160px"
+                                  src={persona.photoUrl}
+                                  unoptimized
+                                />
+                              </div>
+                              <strong>{persona.name}</strong>
+                              {persona.notes ? <small>{persona.notes}</small> : null}
+                              <button
+                                className="primary-button compact-button"
+                                onClick={() => handlePickPersona(persona)}
+                                type="button"
+                              >
+                                {isSelected ? t.studio.personaSelected : t.studio.personaChoose}
+                              </button>
+                            </article>
+                          );
+                        })
+                      )}
+                    </div>
+
+                  </section>
+
+                  <div className="persona-action-row">
+                    <button
+                      className="secondary-button"
+                      onClick={() => setShowPersonaModal(true)}
+                      type="button"
+                    >
+                      + {t.studio.addPersona}
+                    </button>
+                    <label className="secondary-button persona-file-label">
+                      {t.studio.photoWithoutPersona}
+                      <input accept="image/*" className="sr-only" onChange={(event) => { setSelectedPersonaId(null); handleImageChange(event); }} type="file" />
+                    </label>
+                  </div>
+
+                  {showPersonaModal ? (
+                    <div className="modal-backdrop" onClick={() => setShowPersonaModal(false)}>
+                      <div className="modal-content" onClick={(event) => event.stopPropagation()}>
+                        <div className="modal-header">
+                          <h3>{t.studio.addPersona}</h3>
+                          <button className="modal-close" onClick={() => setShowPersonaModal(false)} type="button">✕</button>
+                        </div>
+                        <p className="modal-subtitle">{t.studio.personaPhotoCrop}</p>
+
+                        <form className="wizard-form compact-form" onSubmit={handleCreatePersona} ref={createPersonaFormRef}>
+                          <label className="field">
+                            <span>{t.studio.personaName}</span>
+                            <input
+                              name="name"
+                              onChange={(event) => setNewPersonaName(event.target.value)}
+                              required
+                              type="text"
+                              value={newPersonaName}
+                            />
+                          </label>
+
+                          <label className="field">
+                            <span>{t.studio.personaPhoto}</span>
+                            <input accept="image/*" name="photo" required type="file" />
+                          </label>
+
+                          <label className="field">
+                            <span>{t.studio.personaNotes}</span>
+                            <textarea
+                              name="notes"
+                              onChange={(event) => setNewPersonaNotes(event.target.value)}
+                              placeholder={t.studio.personaNotesPlaceholder}
+                              rows={3}
+                              value={newPersonaNotes}
+                            />
+                          </label>
+
+                          {createPersonaError ? <p className="error-inline">{createPersonaError}</p> : null}
+
+                          <button className="primary-button" disabled={creatingPersona} type="submit">
+                            {creatingPersona ? t.common.creating : t.studio.addPersonaBtn}
+                          </button>
+                        </form>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {referencePreviewUrl ? (
+                    <div className="reference-preview">
+                      <Image
+                        alt={t.studio.referenceImageAlt}
+                        className="media-fill"
+                        fill
+                        sizes="(max-width: 720px) 100vw, 440px"
+                        src={referencePreviewUrl}
+                        unoptimized
+                      />
+                    </div>
+                  ) : null}
+                  <SubStepNav current={2} total={step1Subs.length} onPrev={() => setSubStep(1)} onNext={() => setSubStep(3)} nextLabel={t.studio.recapGenerate} />
+                </div>
+              ) : null}
+
+              {subStep === 3 ? (
+                <div className="substep-content">
+                  {!spokenText.trim() ? (
+                    <p className="field-missing">{t.studio.spokenTextRequired}</p>
+                  ) : null}
+
+                  <div className="substep-recap">
+                    <div className="field static-field">
+                      <span>Preset</span>
+                      <strong>{presetI18n[selectedPreset.id]?.name ?? selectedPreset.name}</strong>
+                    </div>
+                    <div className={`field static-field ${!spokenText.trim() ? "is-missing" : ""}`}>
+                      <span>{t.studio.textLabel}</span>
+                      <strong>{spokenText || t.studio.notFilled}</strong>
+                      {!spokenText.trim() ? <small className="field-missing-hint">{t.studio.requiredClickStep2}</small> : null}
+                    </div>
+                    <div className="field static-field">
+                      <span>{t.studio.modelDuration}</span>
+                      <strong>{modelLabel(model)} · {seconds}s</strong>
+                    </div>
+                    <div className="field static-field">
+                      <span>{t.studio.personaOrPhoto}</span>
+                      <strong>{selectedPersona ? selectedPersona.name : referenceImage ? referenceImage.name : t.studio.noneOptional}</strong>
+                    </div>
+                  </div>
+
+                  {!envReady ? (
+                    <div className="notice-box">
+                      <strong>{t.studio.openaiNotConfigured}</strong>
+                      <p>{t.studio.addOpenAiKey}</p>
+                    </div>
+                  ) : null}
+
+                  <form className="wizard-form" onSubmit={handleHookSubmit}>
+                    <div className="form-actions">
+                      <button className="secondary-button" onClick={() => setSubStep(2)} type="button">
+                        Precedent
+                      </button>
+                      <button className="primary-button" disabled={submittingHook || !envReady || !spokenText.trim()} type="submit">
+                        {submittingHook ? t.studio.generatingHook : t.studio.generateHook}
+                      </button>
+                    </div>
+                  </form>
+
+                  <p className="creation-counter">
+                    {activeCount > 0
+                      ? t.common.creationsInProgress(activeCount)
+                      : t.common.noCreationsInProgress}
+                  </p>
+                </div>
+              ) : null}
             </section>
           ) : null}
 
           {selectedStep === 2 ? (
             <section className="panel step-panel">
-              <div className="panel-header">
-                <div>
-                  <h2>Etape 2 — Demo</h2>
-                  <p>Choisissez une video demo, puis preparez le texte qui sera lu par ElevenLabs.</p>
-                </div>
-                <span className={`badge badge-${selectedDemo ? "success" : "neutral"}`}>
-                  {selectedDemo ? selectedDemo.name : "Aucune demo selectionnee"}
-                </span>
-              </div>
-
               {!selectedHook ? (
                 <div className="empty-state compact-empty">
-                  <h3>Aucun hook selectionne</h3>
-                  <p>Choisissez puis utilisez un hook depuis l&apos;historique a droite pour preparer votre demo.</p>
+                  <h3>{t.studio.noHookSelected}</h3>
+                  <p>{t.studio.step1ChooseHook}</p>
                 </div>
               ) : (
                 <>
                   {!elevenLabsReady ? (
                     <div className="notice-box">
-                      <strong>ElevenLabs n&apos;est pas configure</strong>
-                      <p>Ajoutez `ELEVENLABS_API_KEY` dans `.env.local` pour generer ensuite la voix de la demo.</p>
-                    </div>
-                  ) : null}
-
-                  {selectedHook.voiceCloneStatus === "processing" ? (
-                    <div className="notice-box">
-                      <strong>Preparation du hook en cours</strong>
-                      <p>La voix du hook se prepare en arriere-plan. Vous pouvez deja choisir la demo et ecrire le texte.</p>
-                    </div>
-                  ) : null}
-
-                  {selectedHook.voiceCloneStatus === "failed" ? (
-                    <div className="notice-box">
-                      <strong>Preparation du hook a relancer</strong>
-                      <p>La voix du hook n&apos;est pas prete. Relancez `Utiliser ce hook` depuis la colonne de droite.</p>
+                      <strong>{t.studio.elevenLabsNotConfigured}</strong>
+                      <p>{t.studio.addElevenLabsKey}</p>
                     </div>
                   ) : null}
 
                   {selectedHook.errorMessage ? <p className="error-inline">{selectedHook.errorMessage}</p> : null}
 
-                  <div className="demo-stage-grid">
-                    <section className="subpanel">
-                      <div className="subpanel-header">
-                        <div>
-                          <h3>Bibliotheque de demos</h3>
-                          <p>Choisissez la video de demo sur laquelle vous voulez poser le voiceover.</p>
-                        </div>
-                        <button
-                          className="secondary-button compact-button"
-                          disabled={loadingDemos}
-                          onClick={() => void refreshDemoLibrary()}
-                          type="button"
-                        >
-                          {loadingDemos ? "Chargement..." : "Rafraichir"}
-                        </button>
-                      </div>
-
-                      {demosError ? <p className="error-inline">{demosError}</p> : null}
-
-                      <div className="demo-grid">
-                        {demos.length === 0 ? (
-                          <div className="empty-state compact-empty">
-                            <h3>Aucune demo</h3>
-                            <p>Ajoutez votre premiere video de demo dans le panneau ci-dessous.</p>
+                  {subStep === 0 ? (
+                    <div className="substep-content">
+                      <div className="demo-stage-grid">
+                        <section className="subpanel">
+                          <div className="subpanel-header">
+                            <div>
+                              <h3>{t.studio.demoLibrary}</h3>
+                              <p>{t.studio.demoLibraryDesc}</p>
+                            </div>
+                            <button
+                              className="secondary-button compact-button"
+                              disabled={loadingDemos}
+                              onClick={() => void refreshDemoLibrary()}
+                              type="button"
+                            >
+                              {loadingDemos ? t.common.loading : t.common.refresh}
+                            </button>
                           </div>
-                        ) : (
-                          demos.map((demo) => {
-                            const isEditing = editingDemoId === demo.id;
-                            const isSelected = selectedDemoId === demo.id;
 
-                            return (
-                              <article className={`demo-card ${isSelected ? "is-selected" : ""}`} key={demo.id}>
-                                <div className="demo-card-head">
-                                  <div>
-                                    <h3>{demo.name}</h3>
-                                    <small>{formatDuration(demo.durationSeconds)}</small>
-                                  </div>
-                                  {isSelected ? <span className="badge badge-success">Choisie</span> : null}
-                                </div>
+                          {demosError ? <p className="error-inline">{demosError}</p> : null}
 
-                                <video
-                                  className="video-preview"
-                                  controls
-                                  playsInline
-                                  preload="metadata"
-                                  src={demo.videoUrl}
-                                />
+                          <div className="demo-grid">
+                            {demos.length === 0 ? (
+                              <div className="empty-state compact-empty">
+                                <h3>{t.studio.noDemo}</h3>
+                                <p>{t.studio.addFirstDemo}</p>
+                              </div>
+                            ) : (
+                              demos.map((demo) => {
+                                const isEditing = editingDemoId === demo.id;
+                                const isSelected = selectedDemoId === demo.id;
 
-                                <p className="demo-default-script">{demo.defaultScript}</p>
+                                return (
+                                  <article className={`demo-card ${isSelected ? "is-selected" : ""}`} key={demo.id}>
+                                    <div className="demo-card-head">
+                                      <div>
+                                        <h3>{demo.name}</h3>
+                                        <small>{formatDuration(demo.durationSeconds)}</small>
+                                      </div>
+                                      {isSelected ? <span className="badge badge-success">{t.studio.chosen}</span> : null}
+                                    </div>
 
-                                <div className="demo-card-actions">
-                                  <button className="primary-button compact-button" onClick={() => handlePickDemo(demo)} type="button">
-                                    {isSelected ? "Selection actuelle" : "Choisir cette demo"}
-                                  </button>
-                                  <button className="secondary-button compact-button" onClick={() => startEditingDemo(demo)} type="button">
-                                    Modifier
-                                  </button>
-                                </div>
+                                    <video
+                                      className="video-preview"
+                                      controls
+                                      playsInline
+                                      preload="metadata"
+                                      src={demo.videoUrl}
+                                    />
 
-                                {isEditing ? (
-                                  <div className="inline-editor">
-                                    <label className="field">
-                                      <span>Nom de la demo</span>
-                                      <input
-                                        onChange={(event) => setEditingDemoName(event.target.value)}
-                                        type="text"
-                                        value={editingDemoName}
-                                      />
-                                    </label>
-
-                                    <label className="field">
-                                      <span>Script par defaut</span>
-                                      <textarea
-                                        onChange={(event) => setEditingDemoDefaultScript(event.target.value)}
-                                        rows={4}
-                                        value={editingDemoDefaultScript}
-                                      />
-                                    </label>
+                                    <p className="demo-default-script">{demo.defaultScript}</p>
 
                                     <div className="demo-card-actions">
-                                      <button
-                                        className="primary-button compact-button"
-                                        disabled={savingDemoEdit}
-                                        onClick={() => void handleSaveDemoEdit(demo)}
-                                        type="button"
-                                      >
-                                        {savingDemoEdit ? "Sauvegarde..." : "Sauvegarder"}
+                                      <button className="primary-button compact-button" onClick={() => handlePickDemo(demo)} type="button">
+                                        {isSelected ? t.studio.currentSelection : t.studio.chooseThisDemo}
                                       </button>
-                                      <button
-                                        className="secondary-button compact-button"
-                                        disabled={savingDemoEdit}
-                                        onClick={() => setEditingDemoId(null)}
-                                        type="button"
-                                      >
-                                        Annuler
+                                      <button className="secondary-button compact-button" onClick={() => startEditingDemo(demo)} type="button">
+                                        {t.studio.edit}
                                       </button>
                                     </div>
-                                  </div>
-                                ) : null}
-                              </article>
-                            );
-                          })
-                        )}
+
+                                    {isEditing ? (
+                                      <div className="inline-editor">
+                                        <label className="field">
+                                          <span>{t.studio.demoName}</span>
+                                          <input
+                                            onChange={(event) => setEditingDemoName(event.target.value)}
+                                            type="text"
+                                            value={editingDemoName}
+                                          />
+                                        </label>
+
+                                        <label className="field">
+                                          <span>{t.studio.demoScript}</span>
+                                          <textarea
+                                            onChange={(event) => setEditingDemoDefaultScript(event.target.value)}
+                                            rows={4}
+                                            value={editingDemoDefaultScript}
+                                          />
+                                        </label>
+
+                                        <div className="demo-card-actions">
+                                          <button
+                                            className="primary-button compact-button"
+                                            disabled={savingDemoEdit}
+                                            onClick={() => void handleSaveDemoEdit(demo)}
+                                            type="button"
+                                          >
+                                            {savingDemoEdit ? t.studio.saving : t.studio.saveBtn}
+                                          </button>
+                                          <button
+                                            className="secondary-button compact-button"
+                                            disabled={savingDemoEdit}
+                                            onClick={() => setEditingDemoId(null)}
+                                            type="button"
+                                          >
+                                            {t.common.cancel}
+                                          </button>
+                                        </div>
+                                      </div>
+                                    ) : null}
+                                  </article>
+                                );
+                              })
+                            )}
+                          </div>
+
+                          {editDemoError ? <p className="error-inline">{editDemoError}</p> : null}
+                        </section>
+
+                        <section className="subpanel">
+                          <div className="subpanel-header">
+                            <div>
+                              <h3>{t.studio.addDemo}</h3>
+                              <p>{t.studio.demoLibraryReusable}</p>
+                            </div>
+                          </div>
+
+                          <form className="wizard-form compact-form" onSubmit={handleCreateDemo} ref={createDemoFormRef}>
+                            <label className="field">
+                              <span>{t.studio.demoName}</span>
+                              <input
+                                name="name"
+                                onChange={(event) => setNewDemoName(event.target.value)}
+                                required
+                                type="text"
+                                value={newDemoName}
+                              />
+                            </label>
+
+                            <label className="field">
+                              <span>{t.studio.demoScript}</span>
+                              <textarea
+                                name="defaultScript"
+                                onChange={(event) => setNewDemoDefaultScript(event.target.value)}
+                                required
+                                rows={4}
+                                value={newDemoDefaultScript}
+                              />
+                            </label>
+
+                            <label className="field">
+                              <span>{t.studio.demoVideo}</span>
+                              <input accept="video/mp4,video/*" name="demoVideo" required type="file" />
+                            </label>
+
+                            {createDemoError ? <p className="error-inline">{createDemoError}</p> : null}
+
+                            <button className="primary-button" disabled={creatingDemo} type="submit">
+                              {creatingDemo ? t.common.creating : t.studio.addDemoBtn}
+                            </button>
+                          </form>
+                        </section>
                       </div>
+                      <SubStepNav current={0} total={step2Subs.length} onPrev={() => setSubStep(0)} onNext={() => setSubStep(1)} nextDisabled={!selectedDemoId} />
+                    </div>
+                  ) : null}
 
-                      {editDemoError ? <p className="error-inline">{editDemoError}</p> : null}
-                    </section>
-
-                    <section className="subpanel">
-                      <div className="subpanel-header">
-                        <div>
-                          <h3>Ajouter une demo</h3>
-                          <p>La bibliotheque est reutilisable sur tous les hooks selectionnes.</p>
+                  {subStep === 1 ? (
+                    <div className="substep-content">
+                      <div className="field-grid">
+                        <div className="field static-field">
+                          <span>{t.studio.selectedDemo}</span>
+                          <strong>{selectedDemo ? selectedDemo.name : t.studio.selectDemo}</strong>
+                          <small>
+                            {selectedDemo
+                              ? t.studio.audioOriginalMuted(formatDuration(selectedDemo.durationSeconds))
+                              : t.studio.noDemoSelected}
+                          </small>
                         </div>
                       </div>
 
-                      <form className="wizard-form compact-form" onSubmit={handleCreateDemo} ref={createDemoFormRef}>
-                        <label className="field">
-                          <span>Nom</span>
-                          <input
-                            name="name"
-                            onChange={(event) => setNewDemoName(event.target.value)}
-                            required
-                            type="text"
-                            value={newDemoName}
-                          />
-                        </label>
-
-                        <label className="field">
-                          <span>Script par defaut</span>
-                          <textarea
-                            name="defaultScript"
-                            onChange={(event) => setNewDemoDefaultScript(event.target.value)}
-                            required
-                            rows={4}
-                            value={newDemoDefaultScript}
-                          />
-                        </label>
-
-                        <label className="field">
-                          <span>Video MP4</span>
-                          <input accept="video/mp4,video/*" name="demoVideo" required type="file" />
-                        </label>
-
-                        {createDemoError ? <p className="error-inline">{createDemoError}</p> : null}
-
-                        <button className="primary-button" disabled={creatingDemo} type="submit">
-                          {creatingDemo ? "Creation..." : "Ajouter la demo"}
+                      <label className="field">
+                        <span>{t.studio.demoScriptLabel}</span>
+                        <textarea
+                          onChange={(event) => {
+                            setDemoScript(event.target.value);
+                            setDemoScriptDirty(true);
+                          }}
+                          placeholder={t.studio.demoScriptPlaceholder}
+                          rows={6}
+                          value={demoScript}
+                        />
+                        {demoScriptFit ? (
+                          <small className={`script-fit script-fit-${demoScriptFit.tone}`}>
+                            {demoScriptFit.label} · {demoScriptFit.hint}
+                          </small>
+                        ) : (
+                          <small>{t.studio.demoScriptHint}</small>
+                        )}
+                      </label>
+                      <div className="substep-nav">
+                        <button className="secondary-button" onClick={() => setSubStep(0)} type="button">
+                          Precedent
                         </button>
-                      </form>
-                    </section>
-                  </div>
-
-                  <section className="subpanel">
-                    <div className="subpanel-header">
-                      <div>
-                        <h3>Texte de la demo</h3>
-                        <p>Choisissez la demo puis ajustez le texte que ElevenLabs lira par-dessus.</p>
+                        <button className="primary-button" disabled={!demoScript.trim() || !selectedDemoId} onClick={() => goToStep(3)} type="button">
+                          {t.studio.continueToVoice}
+                        </button>
                       </div>
                     </div>
-
-                    <div className="field-grid">
-                      <div className="field static-field">
-                        <span>Demo selectionnee</span>
-                        <strong>{selectedDemo ? selectedDemo.name : "Choisissez une demo"}</strong>
-                        <small>
-                          {selectedDemo
-                            ? `${formatDuration(selectedDemo.durationSeconds)} · audio original coupe au rendu`
-                            : "Aucune demo selectionnee"}
-                        </small>
-                      </div>
-
-                      <div className="field static-field">
-                        <span>Etat voix hook</span>
-                        <strong>{asyncStatusLabels[selectedHook.voiceCloneStatus]}</strong>
-                        <small>La voix du hook sera reutilisee pour le voiceover final.</small>
-                      </div>
-                    </div>
-
-                    <label className="field">
-                      <span>Texte lu sur la demo</span>
-                      <textarea
-                        onChange={(event) => {
-                          setDemoScript(event.target.value);
-                          setDemoScriptDirty(true);
-                        }}
-                        placeholder="Choisissez une demo pour recuperer son texte par defaut."
-                        required
-                        rows={6}
-                        value={demoScript}
-                      />
-                      {demoScriptFit ? (
-                        <small className={`script-fit script-fit-${demoScriptFit.tone}`}>
-                          {demoScriptFit.label} · {demoScriptFit.hint}
-                        </small>
-                      ) : (
-                        <small>Choisissez une demo pour verifier si le texte tient bien dans la duree.</small>
-                      )}
-                    </label>
-
-                    <div className="form-actions">
-                      <button
-                        className="primary-button"
-                        disabled={!selectedDemoId || !demoScript.trim()}
-                        onClick={() => setSelectedStep(3)}
-                        type="button"
-                      >
-                        Continuer vers le rendu final
-                      </button>
-                    </div>
-                  </section>
+                  ) : null}
                 </>
               )}
             </section>
@@ -1291,51 +1680,141 @@ export function SoraStudio() {
 
           {selectedStep === 3 ? (
             <section className="panel step-panel">
+              {!selectedHook ? (
+                <div className="empty-state compact-empty">
+                  <h3>{t.studio.noHookSelected}</h3>
+                  <p>{t.studio.chooseAndApproveHook}</p>
+                </div>
+              ) : (
+                <>
+                  {!elevenLabsReady ? (
+                    <div className="notice-box">
+                      <strong>{t.studio.elevenLabsNotConfigured}</strong>
+                      <p>{t.studio.addElevenLabsKeyVoice}</p>
+                    </div>
+                  ) : null}
+
+                  {selectedHook.errorMessage ? <p className="error-inline">{selectedHook.errorMessage}</p> : null}
+
+                  <div className="field-grid">
+                    <div className="field static-field">
+                      <span>{t.studio.voiceCloneStatus}</span>
+                      <strong className={`tone-${asyncTone(selectedHook.voiceCloneStatus)}`}>{asyncStatusLabels[selectedHook.voiceCloneStatus]}</strong>
+                      <small>{t.studio.voiceCloneDesc}</small>
+                    </div>
+                    <div className="field static-field">
+                      <span>Audio du hook</span>
+                      <strong>{selectedHook.hookAudioUrl ? t.studio.hookAudioExtracted : t.studio.hookAudioNotAvailable}</strong>
+                      <small>{selectedHook.hookAudioUrl ? t.studio.hookAudioExtractedDesc : t.studio.hookAudioNotAvailableDesc}</small>
+                    </div>
+                  </div>
+
+                  {selectedHook.voiceCloneStatus === "processing" ? (
+                    <div className="notice-box">
+                      <strong>{t.studio.voiceCloneProcessing}</strong>
+                      <p>{t.studio.voiceProcessingNotice}</p>
+                    </div>
+                  ) : null}
+
+                  {selectedHook.voiceCloneStatus === "failed" ? (
+                    <div className="notice-box">
+                      <strong>{t.studio.voiceCloneFailed}</strong>
+                      <p>{t.studio.voiceFailedRetry}</p>
+                    </div>
+                  ) : null}
+
+                  {selectedHook.hookAudioUrl ? (
+                    <article className="asset-stack">
+                      <div className="asset-header">
+                        <span>{t.studio.hookAudioSource}</span>
+                        <a href={selectedHook.hookAudioUrl} rel="noreferrer" target="_blank">
+                          {t.common.download}
+                        </a>
+                      </div>
+                      <audio className="audio-preview" controls preload="metadata" src={selectedHook.hookAudioUrl} />
+                    </article>
+                  ) : null}
+
+                  {selectedHook.voiceoverUrl ? (
+                    <article className="asset-stack">
+                      <div className="asset-header">
+                        <span>{t.studio.voiceoverGenerated}</span>
+                        <a href={selectedHook.voiceoverUrl} rel="noreferrer" target="_blank">
+                          {t.common.download}
+                        </a>
+                      </div>
+                      <audio className="audio-preview" controls preload="metadata" src={selectedHook.voiceoverUrl} />
+                    </article>
+                  ) : null}
+
+                  <div className="substep-nav">
+                    <button className="secondary-button" onClick={() => goToStep(2)} type="button">
+                      {t.studio.backToDemo}
+                    </button>
+                    <button
+                      className="primary-button"
+                      disabled={selectedHook.voiceCloneStatus !== "ready" || !selectedDemoId || !demoScript.trim()}
+                      onClick={() => goToStep(4)}
+                      type="button"
+                    >
+                      {t.studio.continueToRender}
+                    </button>
+                  </div>
+                </>
+              )}
+            </section>
+          ) : null}
+
+          {selectedStep === 4 ? (
+            <section className="panel step-panel">
               <div className="panel-header">
                 <div>
-                  <h2>Etape 3 — Rendu final</h2>
-                  <p>Generez le voiceover ElevenLabs puis le MP4 final a partir de la demo choisie.</p>
+                  <h2>{t.studio.step4Title}</h2>
+                  <p>{t.studio.step4Desc}</p>
                 </div>
-                <span className={`badge badge-${readyStep3 ? "success" : "neutral"}`}>
-                  {readyStep3 ? "Pret a rendre" : "Preparation hook en cours"}
+                <span className={`badge badge-${readyForRender ? "success" : "neutral"}`}>
+                  {readyForRender ? t.status.readyToAssemble : t.status.preparationInProgress}
                 </span>
               </div>
 
               {!selectedHook ? (
                 <div className="empty-state compact-empty">
-                  <h3>Aucun hook actif</h3>
-                  <p>Choisissez puis utilisez un hook depuis l&apos;historique a droite.</p>
+                  <h3>{t.studio.noHookSelected}</h3>
+                  <p>{t.studio.chooseHookFromStep1}</p>
                 </div>
               ) : !selectedDemoId || !demoScript.trim() ? (
                 <div className="notice-box">
-                  <strong>Preparation demo incomplete</strong>
-                  <p>Retournez a l&apos;etape 2 pour choisir une demo et preparer le texte du voiceover.</p>
+                  <strong>{t.studio.demoIncomplete}</strong>
+                  <p>{t.studio.demoIncompleteDesc}</p>
                 </div>
-              ) : !readyStep3 ? (
+              ) : !readyForRender ? (
                 <div className="notice-box">
-                  <strong>Preparation du hook en cours</strong>
-                  <p>La voix du hook n&apos;est pas encore prete. Vous pouvez patienter ici puis lancer le rendu final des qu&apos;elle est disponible.</p>
+                  <strong>{t.studio.voiceNotReady}</strong>
+                  <p>{t.studio.voiceCheckDesc}</p>
                 </div>
               ) : (
                 <>
                   <div className="selected-hook-summary">
                     <div className="summary-card">
-                      <span>Demo choisie</span>
-                      <strong>{selectedDemo?.name ?? "Aucune"}</strong>
-                      <p>{selectedDemo ? formatDuration(selectedDemo.durationSeconds) : "Aucune demo selectionnee"}</p>
+                      <span>{t.studio.hookVideo}</span>
+                      <strong>{selectedHook.videoUrl ? t.status.ready : t.studio.hookAudioNotAvailable}</strong>
+                      <p>{selectedHook.videoUrl ? t.studio.hookVideoIntro(selectedHook.seconds) : t.studio.hookVideoNotGenerated}</p>
                     </div>
                     <div className="summary-card">
-                      <span>Voix</span>
+                      <span>{t.studio.demoChosen}</span>
+                      <strong>{selectedDemo?.name ?? t.common.none}</strong>
+                      <p>{selectedDemo ? t.studio.demoAudioMuted(formatDuration(selectedDemo.durationSeconds)) : t.studio.noDemoSelected}</p>
+                    </div>
+                    <div className="summary-card">
+                      <span>{t.studio.voiceoverLabel}</span>
                       <strong>{asyncStatusLabels[selectedHook.voiceCloneStatus]}</strong>
-                      <p>
-                        {selectedHook.hookAudioUrl ? "Audio hook extrait et stocke." : "Audio hook non expose."}
-                      </p>
+                      <p>{selectedHook.voiceoverUrl ? t.studio.voiceoverReadyToAssemble : t.studio.voiceoverWillGenerate}</p>
                     </div>
                     <div className="summary-card">
-                      <span>MP4 final</span>
+                      <span>{t.studio.finalMp4}</span>
                       <strong>{asyncStatusLabels[selectedHook.finalVideoStatus]}</strong>
                       <p>
-                        {selectedHook.finalVideoUrl ? "Un rendu existe deja et sera remplace si vous regenez." : "Aucun rendu final pour le moment."}
+                        {selectedHook.finalVideoUrl ? t.studio.existingRender : t.studio.noFinalRender}
                       </p>
                     </div>
                   </div>
@@ -1343,39 +1822,39 @@ export function SoraStudio() {
                   <section className="subpanel final-render-panel">
                     <div className="subpanel-header">
                       <div>
-                        <h3>Lancer le rendu final</h3>
-                        <p>Cette etape genere le voiceover final puis remplace l&apos;audio d&apos;origine de la demo.</p>
+                        <h3>{t.studio.launchFinalRender}</h3>
+                        <p>{t.studio.launchFinalRenderDesc}</p>
                       </div>
                     </div>
 
                     <form className="wizard-form" onSubmit={handleFinalizeDemo}>
                       <div className="field-grid">
                         <div className="field static-field">
-                          <span>Demo selectionnee</span>
-                          <strong>{selectedDemo ? selectedDemo.name : "Choisissez une demo"}</strong>
+                          <span>{t.studio.selectedDemo}</span>
+                          <strong>{selectedDemo ? selectedDemo.name : t.studio.selectDemo}</strong>
                           <small>
                             {selectedDemo
-                              ? `${formatDuration(selectedDemo.durationSeconds)} · audio original mute au rendu`
-                              : "Aucune demo selectionnee"}
+                              ? t.studio.audioOriginalMuted(formatDuration(selectedDemo.durationSeconds))
+                              : t.studio.noDemoSelected}
                           </small>
                         </div>
 
                         <div className="field static-field">
-                          <span>Texte retenu</span>
-                          <strong>{demoScriptFit?.label ?? "Pret"}</strong>
-                          <small>{demoScriptFit?.hint ?? "Le texte choisi sera lu sur la demo finale."}</small>
+                          <span>{t.studio.scriptRetained}</span>
+                          <strong>{demoScriptFit?.label ?? t.status.ready}</strong>
+                          <small>{demoScriptFit?.hint ?? t.studio.scriptDefault}</small>
                         </div>
                       </div>
 
                       <div className="field static-field">
-                        <span>Script final</span>
+                        <span>{t.studio.finalScript}</span>
                         <strong>{demoScript}</strong>
                       </div>
 
                       {!elevenLabsReady ? (
                         <div className="notice-box">
-                          <strong>ElevenLabs n&apos;est pas configure</strong>
-                          <p>Le rendu final restera bloque tant que `ELEVENLABS_API_KEY` manque.</p>
+                          <strong>{t.studio.elevenLabsNotConfigured}</strong>
+                          <p>{t.studio.elevenLabsRenderBlocked}</p>
                         </div>
                       ) : null}
 
@@ -1383,10 +1862,10 @@ export function SoraStudio() {
 
                       <div className="form-actions">
                         <button className="primary-button" disabled={!canSubmitFinalDemo} type="submit">
-                          {finalizingHookId === selectedHook.id ? "Rendu final en cours..." : "Generer le MP4 final"}
+                          {finalizingHookId === selectedHook.id ? t.studio.renderInProgress : t.studio.generateFinalMp4}
                         </button>
-                        <button className="secondary-button" onClick={() => setSelectedStep(2)} type="button">
-                          Revenir a l&apos;etape 2
+                        <button className="secondary-button" onClick={() => goToStep(3)} type="button">
+                          {t.studio.backToVoice}
                         </button>
                       </div>
                     </form>
@@ -1395,9 +1874,9 @@ export function SoraStudio() {
                       {selectedHook.hookAudioUrl ? (
                         <article className="asset-stack">
                           <div className="asset-header">
-                            <span>Audio du hook</span>
+                            <span>{t.studio.hookAudioLabel}</span>
                             <a href={selectedHook.hookAudioUrl} rel="noreferrer" target="_blank">
-                              Telecharger
+                              {t.common.download}
                             </a>
                           </div>
                           <audio className="audio-preview" controls preload="metadata" src={selectedHook.hookAudioUrl} />
@@ -1407,9 +1886,9 @@ export function SoraStudio() {
                       {selectedHook.voiceoverUrl ? (
                         <article className="asset-stack">
                           <div className="asset-header">
-                            <span>Voiceover genere</span>
+                            <span>{t.studio.voiceoverGenerated}</span>
                             <a href={selectedHook.voiceoverUrl} rel="noreferrer" target="_blank">
-                              Telecharger
+                              {t.common.download}
                             </a>
                           </div>
                           <audio className="audio-preview" controls preload="metadata" src={selectedHook.voiceoverUrl} />
@@ -1420,14 +1899,14 @@ export function SoraStudio() {
                     {selectedHook.finalVideoUrl ? (
                       <article className="final-video-card">
                         <div className="asset-header">
-                          <span>MP4 final</span>
+                          <span>{t.studio.finalMp4}</span>
                           <a href={selectedHook.finalVideoUrl} rel="noreferrer" target="_blank">
-                            Ouvrir le MP4
+                            {t.studio.openMp4}
                           </a>
                         </div>
-                        <InlineVideoPreview label="Plein écran" src={selectedHook.finalVideoUrl} />
+                        <InlineVideoPreview label={t.common.fullscreen} src={selectedHook.finalVideoUrl} />
                         <p className="final-video-note">
-                          Une nouvelle generation remplacera ce rendu final dans l&apos;interface.
+                          {t.studio.newRenderReplace}
                         </p>
                       </article>
                     ) : null}
@@ -1438,92 +1917,124 @@ export function SoraStudio() {
           ) : null}
         </div>
 
+        {selectedStep === 1 ? (
         <aside className="panel history-panel">
           <div className="panel-header">
             <div>
-              <h2>Historique des hooks</h2>
-              <p>Toutes les generations restent visibles, avec reprise automatique du dernier hook approuve.</p>
+              <h2>{t.studio.hookHistory}</h2>
+              <p>{t.studio.hookHistoryDesc}</p>
             </div>
-            <span className="badge badge-neutral">{historyItems.length} hooks</span>
+            <span className="badge badge-neutral">{t.studio.hooksCount(historyItems.length)}</span>
           </div>
 
           <div className="history-list">
             {historyItems.length === 0 ? (
               <div className="empty-state compact-empty">
-                <h3>Aucun hook</h3>
-                <p>Le premier hook apparaitra ici des qu&apos;il sera cree.</p>
+                <h3>{t.studio.noHooks}</h3>
+                <p>{t.studio.firstHookHint}</p>
               </div>
             ) : (
-              historyItems.map((item) => (
-                <article
-                  className={`history-card ${selectedHookId === item.id ? "is-selected" : ""}`}
-                  key={item.id}
-                  onClick={() => focusHook(item)}
-                >
-                  <div className="history-card-head">
-                    <span className={`badge badge-${generationTone(item.status)}`}>
-                      {hookStatusLabels[item.status]}
-                    </span>
-                    <span className={`badge badge-${approvalTone(item.approvalStatus)}`}>
-                      {approvalLabels[item.approvalStatus]}
-                    </span>
-                  </div>
+              historyItems.map((item) => {
+                const isPending = item.id.startsWith("pending-");
+                const isComplete = item.status === "completed";
+                const hookText = copyForHookCard(item);
+                const truncatedText = hookText.length > 60 ? `${hookText.slice(0, 60)}…` : hookText;
 
-                  <strong>{copyForHookCard(item)}</strong>
-                  <p>{item.sceneDescription ?? "Pas de description de scene."}</p>
+                return (
+                  <details
+                    className="history-card collapsible-card"
+                    key={item.id}
+                  >
+                    <summary className="history-card-summary">
+                      <div className="history-card-head">
+                        <span className={`badge badge-${generationTone(item.status)}`}>
+                          {hookStatusLabels[item.status]}
+                        </span>
+                        <small className="history-card-time">{modelLabel(item.model)} · {item.seconds}s</small>
+                      </div>
+                      <strong>{truncatedText}</strong>
+                    </summary>
 
-                  {selectedHookId === item.id && item.videoUrl ? (
-                    <InlineVideoPreview
-                      className="history-video"
-                      label="Plein écran"
-                      src={item.videoUrl}
-                    />
-                  ) : null}
+                    <div className="history-card-body">
+                      <strong>{hookText}</strong>
+                      <p>{item.sceneDescription ?? t.studio.noSceneDesc}</p>
 
-                  <div className="history-card-meta">
-                    <small>{modelLabel(item.model)} · {item.seconds}s</small>
-                    <small>Voix {asyncStatusLabels[item.voiceCloneStatus]}</small>
-                  </div>
+                      {item.videoUrl ? (
+                        <InlineVideoPreview
+                          className="history-video"
+                          label={t.common.fullscreen}
+                          src={item.videoUrl}
+                        />
+                      ) : null}
 
-                  {item.videoUrl ? null : (
-                    <div className="progress-rail compact-progress">
-                      <div
-                        className="progress-bar"
-                        style={{ width: `${Math.max(item.progressPercent, item.status === "completed" ? 100 : 8)}%` }}
-                      />
+                      {item.videoUrl ? null : (
+                        <div className="progress-rail compact-progress">
+                          <div
+                            className="progress-bar"
+                            style={{ width: `${Math.max(item.progressPercent, isComplete ? 100 : 8)}%` }}
+                          />
+                        </div>
+                      )}
+
+                      <div className="history-card-actions">
+                        {isPending ? (
+                          <span className="badge badge-neutral">{t.common.processing}</span>
+                        ) : isComplete ? (
+                          <button
+                            className="primary-button compact-button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void handleUseHook(item);
+                            }}
+                            type="button"
+                          >
+                            {t.studio.useThisHook}
+                          </button>
+                        ) : (
+                          <span className="badge badge-neutral">{hookStatusLabels[item.status]}</span>
+                        )}
+                      </div>
                     </div>
-                  )}
-
-                  <div className="history-card-actions">
-                    <button
-                      className="secondary-button compact-button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        focusHook(item);
-                      }}
-                      type="button"
-                    >
-                      {item.id.startsWith("pending-") ? "Génération..." : selectedHookId === item.id ? "Sélectionné" : "Lire ce hook"}
-                    </button>
-                    {item.status === "completed" ? (
-                      <button
-                        className="primary-button compact-button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void handleUseHook(item);
-                        }}
-                        type="button"
-                      >
-                        Utiliser ce hook
-                      </button>
-                    ) : null}
-                  </div>
-                </article>
-              ))
-            )}
+                  </details>
+                );
+              }))
+            }
           </div>
         </aside>
+        ) : null}
+        </div>
       </section>
+        ) : null}
+
+        {activeTab === "media" ? (
+          <MediaView
+            demos={demos}
+            items={items}
+            loadingDemos={loadingDemos}
+            onRefreshDemos={() => void refreshDemoLibrary()}
+          />
+        ) : null}
+
+        {activeTab === "persona" ? (
+          <PersonaView
+            onPersonaCreated={() => void refreshPersonaLibrary()}
+            personas={personas}
+          />
+        ) : null}
+
+        {activeTab === "settings" ? (
+          <SettingsView
+            elevenLabsReady={elevenLabsReady}
+            envReady={envReady}
+            onLogout={handleLogout}
+            userEmail={userEmail}
+          />
+        ) : null}
+
+      </div>
+
     </main>
+      <BottomNav activeTab={activeTab} onTabChange={setActiveTab} />
+    </>
   );
 }

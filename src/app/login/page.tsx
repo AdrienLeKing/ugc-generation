@@ -2,8 +2,10 @@
 
 import { useState } from "react";
 import { getBrowserSupabase } from "@/lib/supabase/browser";
+import { useT } from "@/lib/i18n/context";
 
 export default function LoginPage() {
+  const t = useT();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -36,7 +38,7 @@ export default function LoginPage() {
       });
 
       if (loginError) {
-        setError("Compte cree. Connectez-vous.");
+        setError(t.login.signupSuccess);
         setMode("login");
         setLoading(false);
         return;
@@ -64,22 +66,22 @@ export default function LoginPage() {
       <div className="login-card">
         <div className="login-header">
           <span className="eyebrow">Sora Vertical Studio</span>
-          <h1>{mode === "login" ? "Connexion" : "Creer un compte"}</h1>
+          <h1>{mode === "login" ? t.login.loginTitle : t.login.signupTitle}</h1>
           <p>
             {mode === "login"
-              ? "Connectez-vous pour acceder a vos generations."
-              : "Creez un compte pour commencer a generer."}
+              ? t.login.loginSubtitle
+              : t.login.signupSubtitle}
           </p>
         </div>
 
         <form onSubmit={handleSubmit}>
           <label className="field">
-            <span>Email</span>
+            <span>{t.login.email}</span>
             <input
               autoComplete="email"
               disabled={loading}
               onChange={(event) => setEmail(event.target.value)}
-              placeholder="vous@exemple.com"
+              placeholder={t.login.emailPlaceholder}
               required
               type="email"
               value={email}
@@ -87,13 +89,13 @@ export default function LoginPage() {
           </label>
 
           <label className="field">
-            <span>Mot de passe</span>
+            <span>{t.login.password}</span>
             <input
               autoComplete={mode === "signup" ? "new-password" : "current-password"}
               disabled={loading}
               minLength={6}
               onChange={(event) => setPassword(event.target.value)}
-              placeholder="6 caracteres minimum"
+              placeholder={t.login.passwordPlaceholder}
               required
               type="password"
               value={password}
@@ -104,10 +106,10 @@ export default function LoginPage() {
 
           <button className="primary-button login-submit" disabled={loading} type="submit">
             {loading
-              ? "Chargement..."
+              ? t.common.loading
               : mode === "login"
-                ? "Se connecter"
-                : "Creer le compte"}
+                ? t.login.loginBtn
+                : t.login.signupBtn}
           </button>
         </form>
 
@@ -120,8 +122,8 @@ export default function LoginPage() {
           type="button"
         >
           {mode === "login"
-            ? "Pas encore de compte ? Creer un compte"
-            : "Deja un compte ? Se connecter"}
+            ? `${t.login.noAccount} ${t.login.noAccountLink}`
+            : `${t.login.hasAccount} ${t.login.hasAccountLink}`}
         </button>
       </div>
     </main>

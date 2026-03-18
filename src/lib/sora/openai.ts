@@ -110,3 +110,32 @@ export async function createEditJob(sourceVideoId: string, prompt: string) {
 
   return (await response.json()) as RemoteVideoJob;
 }
+
+export async function createUploadedVideoEditJob(input: {
+  videoBuffer: Buffer;
+  videoFileName: string;
+  prompt: string;
+  model: string;
+}) {
+  const formData = new FormData();
+  const blob = new Blob([new Uint8Array(input.videoBuffer)], {
+    type: "video/mp4",
+  });
+  formData.set("video", blob, input.videoFileName);
+  formData.set("prompt", input.prompt);
+  formData.set("model", input.model);
+
+  const response = await fetch(`${OPENAI_API_BASE_URL}/videos/edits`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${getOpenAiApiKey()}`,
+    },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response));
+  }
+
+  return (await response.json()) as RemoteVideoJob;
+}
