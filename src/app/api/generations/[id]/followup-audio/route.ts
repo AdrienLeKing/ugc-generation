@@ -36,6 +36,7 @@ export async function POST(
       },
     });
   } catch (error) {
-    return errorResponse(error, 400);
+    console.error("[followup-audio] Erreur:", error);
+    return errorResponse(error);
   }
 }

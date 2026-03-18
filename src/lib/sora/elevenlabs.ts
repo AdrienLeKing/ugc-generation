@@ -27,14 +27,20 @@ export type ElevenLabsVoice = {
 };
 
 async function parseErrorMessage(response: Response) {
+  let rawBody: string | undefined;
   try {
-    const payload = (await response.json()) as ElevenLabsErrorPayload;
+    rawBody = await response.text();
+    const payload = JSON.parse(rawBody) as ElevenLabsErrorPayload;
 
     if (Array.isArray(payload.detail)) {
       const message = payload.detail
-        .map((entry) => entry.msg?.trim())
+        .map((entry) => {
+          const loc = (entry as Record<string, unknown>).loc;
+          const prefix = Array.isArray(loc) ? `${loc.join(".")}: ` : "";
+          return `${prefix}${entry.msg?.trim() ?? ""}`;
+        })
         .filter(Boolean)
-        .join(" ");
+        .join("; ");
 
       return message || response.statusText;
     }
@@ -43,11 +49,24 @@ async function parseErrorMessage(response: Response) {
       return payload.detail;
     }
 
+    if (typeof payload.detail === "object" && payload.detail !== null && !Array.isArray(payload.detail)) {
+      const obj = payload.detail as Record<string, unknown>;
+      const msg = typeof obj.message === "string" ? obj.message : "";
+      const status = typeof obj.status === "string" ? obj.status : "";
+      if (msg || status) {
+        return [status, msg].filter(Boolean).join(": ");
+      }
+    }
+
     if (payload.message?.trim()) {
       return payload.message;
     }
   } catch {
-    // Ignore JSON parsing failures and fall back to HTTP status text.
+    // JSON parsing failed — log raw body for debugging
+  }
+
+  if (rawBody) {
+    console.error(`[elevenlabs] HTTP ${response.status} raw response:`, rawBody.slice(0, 500));
   }
 
   return response.statusText;
@@ -90,9 +109,14 @@ export async function createVoiceClone(input: {
     formData.set("remove_background_noise", String(input.removeBackgroundNoise));
   }
 
-  const blob = new Blob([new Uint8Array(input.audio.buffer)], {
-    type: input.audio.mimeType,
-  });
+  const bytes = new Uint8Array(
+    input.audio.buffer.buffer as ArrayBuffer,
+    input.audio.buffer.byteOffset,
+    input.audio.buffer.byteLength,
+  );
+  const blob = new Blob([bytes], { type: input.audio.mimeType });
+
+  console.log(`[elevenlabs] createVoiceClone: buffer=${input.audio.buffer.byteLength}b, blob=${blob.size}b, mime=${input.audio.mimeType}, file=${input.audio.fileName}`);
 
   formData.append("files", blob, input.audio.fileName);
 

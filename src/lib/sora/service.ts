@@ -395,7 +395,7 @@ export async function cloneGenerationVoice(
   const description = input.description?.trim() || `Voice clone for generation ${generationId}`;
   const labels = {
     project: "ugc-generation",
-    generation_id: generationId,
+    gen_id: generationId.slice(0, 50),
     ...(input.labels ?? {}),
   };
 
@@ -624,7 +624,7 @@ export async function generateFollowupAudio(
     const voice = await createVoiceClone({
       name: cloneName,
       description: `Temporary voice clone for follow-up audio of generation ${generationId}`,
-      labels: { project: "ugc-generation", generation_id: generationId, type: "followup" },
+      labels: { project: "ugc-generation", gen_id: generationId.slice(0, 50), type: "followup" },
       removeBackgroundNoise: true,
       audio: {
         buffer: hookAudioBuffer,
