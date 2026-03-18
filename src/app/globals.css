@@ -450,6 +450,23 @@ button {
   font-size: 0.92rem;
 }
 
+.script-fit {
+  display: block;
+  margin-top: 2px;
+}
+
+.script-fit-success {
+  color: #cafde9;
+}
+
+.script-fit-accent {
+  color: #ffe0b4;
+}
+
+.script-fit-danger {
+  color: #ffd7d7;
+}
+
 .primary-button,
 .secondary-button {
   min-height: 52px;
@@ -677,8 +694,23 @@ button {
   background: rgba(6, 10, 14, 0.78);
 }
 
-.compact-video {
+.video-shell {
+  display: grid;
+  gap: 8px;
+}
+
+.video-shell-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.video-shell .video-preview {
   border-radius: 18px;
+}
+
+.selected-hook-video {
+  width: min(240px, 100%);
+  align-self: start;
 }
 
 .history-panel {
@@ -730,9 +762,12 @@ button {
 }
 
 .history-video {
-  width: min(150px, 100%);
+  width: min(160px, 100%);
   margin-top: 12px;
-  border-radius: 16px;
+}
+
+.history-card {
+  cursor: pointer;
 }
 
 .progress-rail {

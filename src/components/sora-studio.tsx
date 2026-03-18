@@ -110,17 +110,17 @@ const stepTitles: Array<{ step: WizardStep; title: string; caption: string }> = 
   {
     step: 1,
     title: "Hook",
-    caption: "Generer le hook Sora",
+    caption: "Generer et choisir un hook",
   },
   {
     step: 2,
-    title: "Validation",
-    caption: "Choisir et valider un hook",
+    title: "Demo",
+    caption: "Choisir une demo et preparer le texte",
   },
   {
     step: 3,
-    title: "Demo finale",
-    caption: "Voix clonee, script, MP4 final",
+    title: "Rendu",
+    caption: "Generer et relire le MP4 final",
   },
 ];
 
@@ -219,6 +219,84 @@ function copyForHookCard(item: GenerationRecord) {
   return item.spokenText ?? item.prompt;
 }
 
+function estimateDemoScriptFit(text: string, durationSeconds?: number) {
+  if (!durationSeconds || !text.trim()) {
+    return null;
+  }
+
+  const words = text.trim().split(/\s+/).filter(Boolean).length;
+  const targetWords = durationSeconds * 2.4;
+  const ratio = words / targetWords;
+
+  if (ratio <= 0.85) {
+    return {
+      tone: "success" as const,
+      label: "Confortable",
+      hint: `${words} mots pour ${Math.round(durationSeconds)}s. Il reste de la marge.`,
+    };
+  }
+
+  if (ratio <= 1.1) {
+    return {
+      tone: "accent" as const,
+      label: "Dense mais jouable",
+      hint: `${words} mots pour ${Math.round(durationSeconds)}s. A surveiller.`,
+    };
+  }
+
+  return {
+    tone: "danger" as const,
+    label: "Probablement trop long",
+    hint: `${words} mots pour ${Math.round(durationSeconds)}s. Il faut probablement raccourcir.`,
+  };
+}
+
+function InlineVideoPreview({
+  src,
+  className,
+  label = "Ouvrir en plein écran",
+}: {
+  src: string;
+  className?: string;
+  label?: string;
+}) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  async function handleFullscreen() {
+    const video = videoRef.current;
+
+    if (!video) {
+      return;
+    }
+
+    if (document.fullscreenElement !== video && video.requestFullscreen) {
+      await video.requestFullscreen();
+      return;
+    }
+
+    const webkitVideo = video as HTMLVideoElement & { webkitEnterFullscreen?: () => void };
+    webkitVideo.webkitEnterFullscreen?.();
+  }
+
+  return (
+    <div className={`video-shell ${className ?? ""}`.trim()}>
+      <div className="video-shell-actions">
+        <button className="secondary-button compact-button" onClick={() => void handleFullscreen()} type="button">
+          {label}
+        </button>
+      </div>
+      <video
+        ref={videoRef}
+        className="video-preview"
+        controls
+        playsInline
+        preload="metadata"
+        src={src}
+      />
+    </div>
+  );
+}
+
 export function SoraStudio() {
   const [items, setItems] = useState<GenerationRecord[]>([]);
   const [demos, setDemos] = useState<DemoAsset[]>([]);
@@ -267,9 +345,9 @@ export function SoraStudio() {
   const persistedDemoScript = selectedHook?.demoScriptDraft ?? "";
   const selectedDemo = demos.find((demo) => demo.id === selectedDemoId) ?? null;
   const activeCount = items.filter((item) => item.status === "queued" || item.status === "in_progress").length;
-  const completedHooks = items.filter((item) => item.status === "completed");
   const readyStep3 = isStep3Unlocked(selectedHook);
   const historyItems = pendingHookPreview ? [pendingHookPreview, ...items] : items;
+  const demoScriptFit = estimateDemoScriptFit(demoScript, selectedDemo?.durationSeconds);
 
   async function handleLogout() {
     await getBrowserSupabase().auth.signOut();
@@ -407,12 +485,12 @@ export function SoraStudio() {
   ]);
 
   useEffect(() => {
-    if (selectedStep !== 3 || !readyStep3) {
+    if (selectedStep !== 2) {
       return;
     }
 
     void refreshDemoLibrary(false);
-  }, [selectedStep, readyStep3]);
+  }, [selectedStep]);
 
   function handleImageChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0] ?? null;
@@ -450,11 +528,6 @@ export function SoraStudio() {
 
   function focusHook(item: GenerationRecord) {
     setSelectedHookId(item.id);
-  }
-
-  function openHookInValidation(item: GenerationRecord) {
-    setSelectedHookId(item.id);
-    setSelectedStep(2);
   }
 
   function buildPendingHookPreview(input: { spokenText: string; sceneDescription: string }) {
@@ -572,7 +645,7 @@ export function SoraStudio() {
     }
   }
 
-  async function handleApproveHook(item: GenerationRecord) {
+  async function handleApproveHook(item: GenerationRecord, nextStep: WizardStep = stepForHook(item)) {
     setApproveBusyId(item.id);
     setDashboardError(null);
     setSelectedHookId(item.id);
@@ -602,7 +675,7 @@ export function SoraStudio() {
       }
 
       setSelectedHookId(payload.item.id);
-      setSelectedStep(stepForHook(payload.item));
+      setSelectedStep(nextStep);
       await refreshDashboard(false);
     } catch (error) {
       setDashboardError(error instanceof Error ? error.message : "La validation du hook a echoue.");
@@ -763,6 +836,21 @@ export function SoraStudio() {
     Boolean(demoScript.trim()) &&
     !finalizingHookId &&
     elevenLabsReady;
+
+  async function handleUseHook(item: GenerationRecord) {
+    setSelectedHookId(item.id);
+    setSelectedStep(2);
+
+    if (item.status !== "completed") {
+      return;
+    }
+
+    if (item.approvalStatus === "approved" && (item.voiceCloneStatus === "ready" || item.voiceCloneStatus === "processing")) {
+      return;
+    }
+
+    await handleApproveHook(item, 2);
+  }
 
   return (
     <main className="page-shell">
@@ -947,208 +1035,50 @@ export function SoraStudio() {
             <section className="panel step-panel">
               <div className="panel-header">
                 <div>
-                  <h2>Etape 2 — Validation</h2>
-                  <p>Choisissez un hook termine, puis activez son usage pour la demo finale.</p>
+                  <h2>Etape 2 — Demo</h2>
+                  <p>Choisissez une video demo, puis preparez le texte qui sera lu par ElevenLabs.</p>
                 </div>
-                <span className={`badge badge-${selectedHook ? approvalTone(selectedHook.approvalStatus) : "neutral"}`}>
-                  {selectedHook ? approvalLabels[selectedHook.approvalStatus] : "Aucun hook selectionne"}
-                </span>
-              </div>
-
-              {!elevenLabsReady ? (
-                <div className="notice-box">
-                  <strong>ElevenLabs n&apos;est pas configure</strong>
-                  <p>Ajoutez `ELEVENLABS_API_KEY` dans `.env.local` pour cloner la voix apres validation.</p>
-                </div>
-              ) : null}
-
-              {selectedHook ? (
-                <article className="selected-hook-panel">
-                  <div className="selected-hook-copy">
-                    <span className="eyebrow">Hook actif</span>
-                    <h3>{copyForHookCard(selectedHook)}</h3>
-                    <p>{selectedHook.sceneDescription ?? "Pas de description de scene."}</p>
-                  </div>
-
-                  <div className="selected-hook-meta">
-                    <div className="mini-stat">
-                      <span>Statut hook</span>
-                      <strong>{hookStatusLabels[selectedHook.status]}</strong>
-                    </div>
-                    <div className="mini-stat">
-                      <span>Validation</span>
-                      <strong>{approvalLabels[selectedHook.approvalStatus]}</strong>
-                    </div>
-                    <div className="mini-stat">
-                      <span>Voix clonee</span>
-                      <strong>{asyncStatusLabels[selectedHook.voiceCloneStatus]}</strong>
-                    </div>
-                  </div>
-
-                  {selectedHook.videoUrl ? (
-                    <video
-                      className="video-preview compact-video"
-                      controls
-                      playsInline
-                      preload="metadata"
-                      src={selectedHook.videoUrl}
-                    />
-                  ) : null}
-
-                  <div className="selected-hook-actions">
-                    {selectedHook.approvalStatus === "approved" && selectedHook.voiceCloneStatus === "ready" ? (
-                      <button className="primary-button" onClick={() => setSelectedStep(3)} type="button">
-                        Passer a la demo finale
-                      </button>
-                    ) : null}
-
-                    {selectedHook.status === "completed" && selectedHook.approvalStatus !== "approved" ? (
-                      <button
-                        className="primary-button"
-                        disabled={!elevenLabsReady || approveBusyId === selectedHook.id}
-                        onClick={() => void handleApproveHook(selectedHook)}
-                        type="button"
-                      >
-                        {approveBusyId === selectedHook.id ? "Validation en cours..." : "Utiliser ce hook"}
-                      </button>
-                    ) : null}
-
-                    {selectedHook.approvalStatus === "approved" && selectedHook.voiceCloneStatus === "failed" ? (
-                      <button
-                        className="secondary-button"
-                        disabled={!elevenLabsReady || approveBusyId === selectedHook.id}
-                        onClick={() => void handleApproveHook(selectedHook)}
-                        type="button"
-                      >
-                        {approveBusyId === selectedHook.id ? "Relance..." : "Relancer la creation de voix"}
-                      </button>
-                    ) : null}
-                  </div>
-
-                  {selectedHook.errorMessage ? <p className="error-inline">{selectedHook.errorMessage}</p> : null}
-                </article>
-              ) : (
-                <div className="empty-state compact-empty">
-                  <h3>Aucun hook selectionne</h3>
-                  <p>Choisissez un hook termine depuis l&apos;historique ou depuis la liste ci-dessous.</p>
-                </div>
-              )}
-
-              <div className="hook-catalog">
-                {completedHooks.length === 0 ? (
-                  <div className="empty-state compact-empty">
-                    <h3>Aucun hook termine</h3>
-                    <p>Generez d&apos;abord un hook dans l&apos;etape 1.</p>
-                  </div>
-                ) : (
-                  completedHooks.map((item) => (
-                    <article
-                      className={`hook-card ${selectedHookId === item.id ? "is-selected" : ""}`}
-                      key={item.id}
-                    >
-                      <div className="hook-card-head">
-                        <div>
-                          <span className="eyebrow">{modelLabel(item.model)} · {item.seconds}s</span>
-                          <h3>{copyForHookCard(item)}</h3>
-                        </div>
-                        <div className="hook-card-badges">
-                          <span className={`badge badge-${approvalTone(item.approvalStatus)}`}>
-                            {approvalLabels[item.approvalStatus]}
-                          </span>
-                          <span className={`badge badge-${asyncTone(item.voiceCloneStatus)}`}>
-                            Voix {asyncStatusLabels[item.voiceCloneStatus]}
-                          </span>
-                        </div>
-                      </div>
-
-                      <p className="hook-card-scene">{item.sceneDescription ?? "Pas de description de scene."}</p>
-
-                      <div className="hook-card-footer">
-                        <small>Termine le {formatDate(item.updatedAt)}</small>
-                        <div className="hook-card-actions">
-                          <button className="secondary-button compact-button" onClick={() => focusHook(item)} type="button">
-                            Selectionner
-                          </button>
-                          {item.approvalStatus === "approved" && item.voiceCloneStatus === "ready" ? (
-                            <button className="primary-button compact-button" onClick={() => { setSelectedHookId(item.id); setSelectedStep(3); }} type="button">
-                              Ouvrir la demo
-                            </button>
-                          ) : (
-                            <button
-                              className="primary-button compact-button"
-                              disabled={!elevenLabsReady || approveBusyId === item.id}
-                              onClick={() => void handleApproveHook(item)}
-                              type="button"
-                            >
-                              {approveBusyId === item.id ? "Traitement..." : item.voiceCloneStatus === "failed" ? "Relancer" : "Utiliser ce hook"}
-                            </button>
-                          )}
-                        </div>
-                      </div>
-
-                      {item.errorMessage ? <p className="error-inline">{item.errorMessage}</p> : null}
-                    </article>
-                  ))
-                )}
-              </div>
-            </section>
-          ) : null}
-
-          {selectedStep === 3 ? (
-            <section className="panel step-panel">
-              <div className="panel-header">
-                <div>
-                  <h2>Etape 3 — Demo finale</h2>
-                  <p>Choisir une demo, editer le script, generer la voix puis remplacer l&apos;audio d&apos;origine.</p>
-                </div>
-                <span className={`badge badge-${readyStep3 ? "success" : "neutral"}`}>
-                  {readyStep3 ? "Debloquee" : "Verrouillee"}
+                <span className={`badge badge-${selectedDemo ? "success" : "neutral"}`}>
+                  {selectedDemo ? selectedDemo.name : "Aucune demo selectionnee"}
                 </span>
               </div>
 
               {!selectedHook ? (
                 <div className="empty-state compact-empty">
-                  <h3>Aucun hook actif</h3>
-                  <p>Validez d&apos;abord un hook dans l&apos;etape 2.</p>
-                </div>
-              ) : !readyStep3 ? (
-                <div className="notice-box">
-                  <strong>La demo finale est encore verrouillee</strong>
-                  <p>
-                    Le hook doit etre valide et la voix clonee doit etre prete avant d&apos;ouvrir la
-                    bibliotheque de demos.
-                  </p>
+                  <h3>Aucun hook selectionne</h3>
+                  <p>Choisissez puis utilisez un hook depuis l&apos;historique a droite pour preparer votre demo.</p>
                 </div>
               ) : (
                 <>
-                  <div className="selected-hook-summary">
-                    <div className="summary-card">
-                      <span>Hook actif</span>
-                      <strong>{copyForHookCard(selectedHook)}</strong>
-                      <p>{selectedHook.elevenlabsVoiceName ?? "Voix clonee prete"}</p>
+                  {!elevenLabsReady ? (
+                    <div className="notice-box">
+                      <strong>ElevenLabs n&apos;est pas configure</strong>
+                      <p>Ajoutez `ELEVENLABS_API_KEY` dans `.env.local` pour generer ensuite la voix de la demo.</p>
                     </div>
-                    <div className="summary-card">
-                      <span>Voix</span>
-                      <strong>{asyncStatusLabels[selectedHook.voiceCloneStatus]}</strong>
-                      <p>
-                        {selectedHook.hookAudioUrl ? "Audio hook extrait et stocke." : "Audio hook non expose."}
-                      </p>
+                  ) : null}
+
+                  {selectedHook.voiceCloneStatus === "processing" ? (
+                    <div className="notice-box">
+                      <strong>Preparation du hook en cours</strong>
+                      <p>La voix du hook se prepare en arriere-plan. Vous pouvez deja choisir la demo et ecrire le texte.</p>
                     </div>
-                    <div className="summary-card">
-                      <span>MP4 final</span>
-                      <strong>{asyncStatusLabels[selectedHook.finalVideoStatus]}</strong>
-                      <p>
-                        {selectedHook.finalVideoUrl ? "Un rendu existe deja et sera remplace si vous regenez." : "Aucun rendu final pour le moment."}
-                      </p>
+                  ) : null}
+
+                  {selectedHook.voiceCloneStatus === "failed" ? (
+                    <div className="notice-box">
+                      <strong>Preparation du hook a relancer</strong>
+                      <p>La voix du hook n&apos;est pas prete. Relancez `Utiliser ce hook` depuis la colonne de droite.</p>
                     </div>
-                  </div>
+                  ) : null}
+
+                  {selectedHook.errorMessage ? <p className="error-inline">{selectedHook.errorMessage}</p> : null}
 
                   <div className="demo-stage-grid">
                     <section className="subpanel">
                       <div className="subpanel-header">
                         <div>
                           <h3>Bibliotheque de demos</h3>
-                          <p>La liste se charge seulement quand cette etape est accessible.</p>
+                          <p>Choisissez la video de demo sur laquelle vous voulez poser le voiceover.</p>
                         </div>
                         <button
                           className="secondary-button compact-button"
@@ -1184,7 +1114,7 @@ export function SoraStudio() {
                                 </div>
 
                                 <video
-                                  className="video-preview compact-video"
+                                  className="video-preview"
                                   controls
                                   playsInline
                                   preload="metadata"
@@ -1255,7 +1185,7 @@ export function SoraStudio() {
                       <div className="subpanel-header">
                         <div>
                           <h3>Ajouter une demo</h3>
-                          <p>La bibliotheque est reutilisable sur tous les hooks valides.</p>
+                          <p>La bibliotheque est reutilisable sur tous les hooks selectionnes.</p>
                         </div>
                       </div>
 
@@ -1296,11 +1226,125 @@ export function SoraStudio() {
                     </section>
                   </div>
 
+                  <section className="subpanel">
+                    <div className="subpanel-header">
+                      <div>
+                        <h3>Texte de la demo</h3>
+                        <p>Choisissez la demo puis ajustez le texte que ElevenLabs lira par-dessus.</p>
+                      </div>
+                    </div>
+
+                    <div className="field-grid">
+                      <div className="field static-field">
+                        <span>Demo selectionnee</span>
+                        <strong>{selectedDemo ? selectedDemo.name : "Choisissez une demo"}</strong>
+                        <small>
+                          {selectedDemo
+                            ? `${formatDuration(selectedDemo.durationSeconds)} · audio original coupe au rendu`
+                            : "Aucune demo selectionnee"}
+                        </small>
+                      </div>
+
+                      <div className="field static-field">
+                        <span>Etat voix hook</span>
+                        <strong>{asyncStatusLabels[selectedHook.voiceCloneStatus]}</strong>
+                        <small>La voix du hook sera reutilisee pour le voiceover final.</small>
+                      </div>
+                    </div>
+
+                    <label className="field">
+                      <span>Texte lu sur la demo</span>
+                      <textarea
+                        onChange={(event) => {
+                          setDemoScript(event.target.value);
+                          setDemoScriptDirty(true);
+                        }}
+                        placeholder="Choisissez une demo pour recuperer son texte par defaut."
+                        required
+                        rows={6}
+                        value={demoScript}
+                      />
+                      {demoScriptFit ? (
+                        <small className={`script-fit script-fit-${demoScriptFit.tone}`}>
+                          {demoScriptFit.label} · {demoScriptFit.hint}
+                        </small>
+                      ) : (
+                        <small>Choisissez une demo pour verifier si le texte tient bien dans la duree.</small>
+                      )}
+                    </label>
+
+                    <div className="form-actions">
+                      <button
+                        className="primary-button"
+                        disabled={!selectedDemoId || !demoScript.trim()}
+                        onClick={() => setSelectedStep(3)}
+                        type="button"
+                      >
+                        Continuer vers le rendu final
+                      </button>
+                    </div>
+                  </section>
+                </>
+              )}
+            </section>
+          ) : null}
+
+          {selectedStep === 3 ? (
+            <section className="panel step-panel">
+              <div className="panel-header">
+                <div>
+                  <h2>Etape 3 — Rendu final</h2>
+                  <p>Generez le voiceover ElevenLabs puis le MP4 final a partir de la demo choisie.</p>
+                </div>
+                <span className={`badge badge-${readyStep3 ? "success" : "neutral"}`}>
+                  {readyStep3 ? "Pret a rendre" : "Preparation hook en cours"}
+                </span>
+              </div>
+
+              {!selectedHook ? (
+                <div className="empty-state compact-empty">
+                  <h3>Aucun hook actif</h3>
+                  <p>Choisissez puis utilisez un hook depuis l&apos;historique a droite.</p>
+                </div>
+              ) : !selectedDemoId || !demoScript.trim() ? (
+                <div className="notice-box">
+                  <strong>Preparation demo incomplete</strong>
+                  <p>Retournez a l&apos;etape 2 pour choisir une demo et preparer le texte du voiceover.</p>
+                </div>
+              ) : !readyStep3 ? (
+                <div className="notice-box">
+                  <strong>Preparation du hook en cours</strong>
+                  <p>La voix du hook n&apos;est pas encore prete. Vous pouvez patienter ici puis lancer le rendu final des qu&apos;elle est disponible.</p>
+                </div>
+              ) : (
+                <>
+                  <div className="selected-hook-summary">
+                    <div className="summary-card">
+                      <span>Demo choisie</span>
+                      <strong>{selectedDemo?.name ?? "Aucune"}</strong>
+                      <p>{selectedDemo ? formatDuration(selectedDemo.durationSeconds) : "Aucune demo selectionnee"}</p>
+                    </div>
+                    <div className="summary-card">
+                      <span>Voix</span>
+                      <strong>{asyncStatusLabels[selectedHook.voiceCloneStatus]}</strong>
+                      <p>
+                        {selectedHook.hookAudioUrl ? "Audio hook extrait et stocke." : "Audio hook non expose."}
+                      </p>
+                    </div>
+                    <div className="summary-card">
+                      <span>MP4 final</span>
+                      <strong>{asyncStatusLabels[selectedHook.finalVideoStatus]}</strong>
+                      <p>
+                        {selectedHook.finalVideoUrl ? "Un rendu existe deja et sera remplace si vous regenez." : "Aucun rendu final pour le moment."}
+                      </p>
+                    </div>
+                  </div>
+
                   <section className="subpanel final-render-panel">
                     <div className="subpanel-header">
                       <div>
-                        <h3>Script final et rendu MP4</h3>
-                        <p>Le texte est precharge depuis la demo puis modifiable manuellement.</p>
+                        <h3>Lancer le rendu final</h3>
+                        <p>Cette etape genere le voiceover final puis remplace l&apos;audio d&apos;origine de la demo.</p>
                       </div>
                     </div>
 
@@ -1317,25 +1361,16 @@ export function SoraStudio() {
                         </div>
 
                         <div className="field static-field">
-                          <span>Voix du hook</span>
-                          <strong>{selectedHook.elevenlabsVoiceName ?? "Voix clonee prete"}</strong>
-                          <small>Le voiceover utilise exclusivement la voix clonee du hook valide.</small>
+                          <span>Texte retenu</span>
+                          <strong>{demoScriptFit?.label ?? "Pret"}</strong>
+                          <small>{demoScriptFit?.hint ?? "Le texte choisi sera lu sur la demo finale."}</small>
                         </div>
                       </div>
 
-                      <label className="field">
-                        <span>Texte lu dans la demo finale</span>
-                        <textarea
-                          onChange={(event) => {
-                            setDemoScript(event.target.value);
-                            setDemoScriptDirty(true);
-                          }}
-                          placeholder="Choisissez une demo pour recuperer son texte par defaut."
-                          required
-                          rows={6}
-                          value={demoScript}
-                        />
-                      </label>
+                      <div className="field static-field">
+                        <span>Script final</span>
+                        <strong>{demoScript}</strong>
+                      </div>
 
                       {!elevenLabsReady ? (
                         <div className="notice-box">
@@ -1350,14 +1385,8 @@ export function SoraStudio() {
                         <button className="primary-button" disabled={!canSubmitFinalDemo} type="submit">
                           {finalizingHookId === selectedHook.id ? "Rendu final en cours..." : "Generer le MP4 final"}
                         </button>
-
-                        <button
-                          className="secondary-button"
-                          disabled={loadingDemos}
-                          onClick={() => void refreshDemoLibrary()}
-                          type="button"
-                        >
-                          Recharger les demos
+                        <button className="secondary-button" onClick={() => setSelectedStep(2)} type="button">
+                          Revenir a l&apos;etape 2
                         </button>
                       </div>
                     </form>
@@ -1396,13 +1425,7 @@ export function SoraStudio() {
                             Ouvrir le MP4
                           </a>
                         </div>
-                        <video
-                          className="video-preview"
-                          controls
-                          playsInline
-                          preload="metadata"
-                          src={selectedHook.finalVideoUrl}
-                        />
+                        <InlineVideoPreview label="Plein écran" src={selectedHook.finalVideoUrl} />
                         <p className="final-video-note">
                           Une nouvelle generation remplacera ce rendu final dans l&apos;interface.
                         </p>
@@ -1435,6 +1458,7 @@ export function SoraStudio() {
                 <article
                   className={`history-card ${selectedHookId === item.id ? "is-selected" : ""}`}
                   key={item.id}
+                  onClick={() => focusHook(item)}
                 >
                   <div className="history-card-head">
                     <span className={`badge badge-${generationTone(item.status)}`}>
@@ -1449,11 +1473,9 @@ export function SoraStudio() {
                   <p>{item.sceneDescription ?? "Pas de description de scene."}</p>
 
                   {selectedHookId === item.id && item.videoUrl ? (
-                    <video
-                      className="video-preview compact-video history-video"
-                      controls
-                      playsInline
-                      preload="metadata"
+                    <InlineVideoPreview
+                      className="history-video"
+                      label="Plein écran"
                       src={item.videoUrl}
                     />
                   ) : null}
@@ -1473,11 +1495,25 @@ export function SoraStudio() {
                   )}
 
                   <div className="history-card-actions">
-                    <button className="secondary-button compact-button" onClick={() => focusHook(item)} type="button">
+                    <button
+                      className="secondary-button compact-button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        focusHook(item);
+                      }}
+                      type="button"
+                    >
                       {item.id.startsWith("pending-") ? "Génération..." : selectedHookId === item.id ? "Sélectionné" : "Lire ce hook"}
                     </button>
                     {item.status === "completed" ? (
-                      <button className="primary-button compact-button" onClick={() => openHookInValidation(item)} type="button">
+                      <button
+                        className="primary-button compact-button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void handleUseHook(item);
+                        }}
+                        type="button"
+                      >
                         Utiliser ce hook
                       </button>
                     ) : null}
