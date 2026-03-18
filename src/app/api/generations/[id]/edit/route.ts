@@ -14,6 +14,25 @@ function errorResponse(error: unknown, status = 500) {
   );
 }
 
+function statusCodeForError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return 500;
+  }
+
+  if (
+    error.message.includes("obligatoire") ||
+    error.message.includes("terminees peuvent etre editees")
+  ) {
+    return 400;
+  }
+
+  if (error.message.includes("introuvable")) {
+    return 404;
+  }
+
+  return 500;
+}
+
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -31,6 +50,6 @@ export async function POST(
 
     return NextResponse.json({ item: record });
   } catch (error) {
-    return errorResponse(error, 400);
+    return errorResponse(error, statusCodeForError(error));
   }
 }

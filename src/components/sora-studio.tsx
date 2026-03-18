@@ -18,6 +18,7 @@ type DashboardResponse = {
   envReady: boolean;
   pollIntervalMs: number;
   items: GenerationRecord[];
+  backendError?: string;
 };
 
 async function requestDashboard() {
@@ -95,7 +96,7 @@ export function SoraStudio() {
       setPollIntervalMs(payload.pollIntervalMs);
     });
 
-    setErrorMessage(null);
+    setErrorMessage(payload.backendError ?? null);
   }
 
   async function refreshDashboard(showSpinner = true) {

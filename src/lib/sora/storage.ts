@@ -34,6 +34,21 @@ export async function uploadVideo(videoId: string, buffer: ArrayBuffer): Promise
   return getPublicUrl(path);
 }
 
+export async function uploadAudio(path: string, buffer: Buffer, contentType: string): Promise<string> {
+  const { error } = await supabase.storage
+    .from(BUCKET)
+    .upload(path, buffer, {
+      contentType,
+      upsert: true,
+    });
+
+  if (error) {
+    throw new Error(`Erreur upload audio: ${error.message}`);
+  }
+
+  return getPublicUrl(path);
+}
+
 export function getPublicUrl(path: string): string {
   const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
   return data.publicUrl;

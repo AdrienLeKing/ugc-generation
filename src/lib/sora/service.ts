@@ -1,5 +1,10 @@
+import { extname } from "node:path";
+
 import {
   DEFAULT_DURATION_SECONDS,
+  DEFAULT_ELEVENLABS_MODEL,
+  DEFAULT_ELEVENLABS_OUTPUT_FORMAT,
+  DEFAULT_ELEVENLABS_VOICE_SETTINGS,
   DEFAULT_MODEL,
   DEFAULT_SIZE,
   DURATION_OPTIONS,
@@ -7,13 +12,21 @@ import {
   VERTICAL_SIZE_OPTIONS,
 } from "@/lib/sora/config";
 import { readRecord, readRecords, upsertRecord, upsertRecords } from "@/lib/sora/db";
-import { hasOpenAiApiKey } from "@/lib/sora/env";
+import { deleteVoice, getVoice, createVoiceClone, convertTextToSpeech } from "@/lib/sora/elevenlabs";
+import { hasElevenLabsApiKey, hasOpenAiApiKey } from "@/lib/sora/env";
 import { normalizeStatus } from "@/lib/sora/mapper";
 import { prepareReferenceImage, prepareReferenceImageFromPath } from "@/lib/sora/media";
 import { createEditJob, createRemoteVideoJob, downloadRemoteVideo, retrieveRemoteVideoJob } from "@/lib/sora/openai";
-import { uploadImage, uploadVideo } from "@/lib/sora/storage";
-import type { CreateGenerationInput, GenerationRecord, RemoteVideoJob, SoraModel, VerticalSize } from "@/lib/sora/types";
-import { clamp, nowIsoString, toIsoTimestamp } from "@/lib/sora/utils";
+import { uploadAudio, uploadImage, uploadVideo } from "@/lib/sora/storage";
+import type {
+  CreateGenerationInput,
+  ElevenLabsVoiceSettings,
+  GenerationRecord,
+  RemoteVideoJob,
+  SoraModel,
+  VerticalSize,
+} from "@/lib/sora/types";
+import { clamp, nowIsoString, sanitizeFileName, toIsoTimestamp } from "@/lib/sora/utils";
 
 function isSupportedSeconds(seconds: number) {
   return DURATION_OPTIONS.some((option) => option.value === seconds);
@@ -35,6 +48,7 @@ function mapRemoteJobToRecord(
     ...existing,
     status: normalizeStatus(remoteJob.status),
     progressPercent:
+      remoteJob.progress ??
       remoteJob.progress_percent ??
       (remoteJob.status === "completed" ? 100 : 0),
     errorMessage: remoteJob.error?.message,
@@ -43,6 +57,32 @@ function mapRemoteJobToRecord(
     remoteCompletedAt: toIsoTimestamp(remoteJob.completed_at),
     remoteExpiresAt: toIsoTimestamp(remoteJob.expires_at),
   };
+}
+
+function shouldRefreshRecord(record: GenerationRecord) {
+  return record.status === "queued" || record.status === "in_progress" || (record.status === "completed" && !record.videoUrl);
+}
+
+async function preservePersistedVideoFields(record: GenerationRecord): Promise<GenerationRecord> {
+  if (record.status !== "completed" || record.videoUrl) {
+    return record;
+  }
+
+  try {
+    const persisted = await readRecord(record.id);
+
+    if (!persisted.videoUrl) {
+      return record;
+    }
+
+    return {
+      ...record,
+      videoUrl: persisted.videoUrl,
+      videoFileName: persisted.videoFileName,
+    };
+  } catch {
+    return record;
+  }
 }
 
 async function ensureVideoUploaded(record: GenerationRecord): Promise<GenerationRecord> {
@@ -59,6 +99,92 @@ async function ensureVideoUploaded(record: GenerationRecord): Promise<Generation
     videoFileName: `${record.id}.mp4`,
     updatedAt: nowIsoString(),
   };
+}
+
+const SUPPORTED_AUDIO_MIME_TYPES = new Set([
+  "audio/mpeg",
+  "audio/mp3",
+  "audio/wav",
+  "audio/x-wav",
+  "audio/wave",
+  "audio/vnd.wave",
+]);
+
+function assertElevenLabsReady() {
+  if (!hasElevenLabsApiKey()) {
+    throw new Error("ELEVENLABS_API_KEY est manquante. Ajoutez-la dans .env.local avant de cloner une voix.");
+  }
+}
+
+function ensureCompletedGeneration(record: GenerationRecord) {
+  if (record.status !== "completed") {
+    throw new Error("La generation doit etre terminee avant de cloner une voix.");
+  }
+}
+
+function resolveAudioFormat(fileName: string, mimeType: string) {
+  const existingExtension = extname(fileName).toLowerCase();
+  if (existingExtension === ".mp3" || existingExtension === ".wav") {
+    return {
+      extension: existingExtension.slice(1),
+      contentType:
+        mimeType ||
+        (existingExtension === ".mp3" ? "audio/mpeg" : "audio/wav"),
+    };
+  }
+
+  if (mimeType === "audio/mpeg" || mimeType === "audio/mp3") {
+    return {
+      extension: "mp3",
+      contentType: "audio/mpeg",
+    };
+  }
+
+  if (SUPPORTED_AUDIO_MIME_TYPES.has(mimeType)) {
+    return {
+      extension: "wav",
+      contentType: "audio/wav",
+    };
+  }
+
+  throw new Error("Le fichier audio doit etre un MP3 ou un WAV.");
+}
+
+function mergeVoiceSettings(settings?: Partial<ElevenLabsVoiceSettings>): ElevenLabsVoiceSettings {
+  const merged: ElevenLabsVoiceSettings = {
+    ...DEFAULT_ELEVENLABS_VOICE_SETTINGS,
+    ...settings,
+  };
+
+  if (!Number.isFinite(merged.stability) || merged.stability < 0 || merged.stability > 1) {
+    throw new Error("Le parametre stability doit etre compris entre 0 et 1.");
+  }
+
+  if (!Number.isFinite(merged.similarityBoost) || merged.similarityBoost < 0 || merged.similarityBoost > 1) {
+    throw new Error("Le parametre similarityBoost doit etre compris entre 0 et 1.");
+  }
+
+  if (!Number.isFinite(merged.style) || merged.style < 0 || merged.style > 1) {
+    throw new Error("Le parametre style doit etre compris entre 0 et 1.");
+  }
+
+  if (merged.speed !== undefined && (!Number.isFinite(merged.speed) || merged.speed <= 0)) {
+    throw new Error("Le parametre speed doit etre superieur a 0.");
+  }
+
+  return merged;
+}
+
+function buildHookAudioFileName(generationId: string, originalName: string, mimeType: string) {
+  const { extension } = resolveAudioFormat(originalName, mimeType);
+  const baseName = sanitizeFileName(originalName.replace(/\.[^.]+$/, "")) || `hook-${generationId}`;
+  return `${baseName}-${generationId}.${extension}`;
+}
+
+function buildVoiceoverFileName(generationId: string, outputFormat: string) {
+  const codec = outputFormat.split("_")[0] || "mp3";
+  const extension = codec === "pcm" ? "wav" : codec;
+  return `voiceover-${generationId}.${extension}`;
 }
 
 export async function createGenerations(input: CreateGenerationInput) {
@@ -111,7 +237,7 @@ export async function createGenerations(input: CreateGenerationInput) {
     editPrompt: undefined,
   };
 
-  const createdJobs = await Promise.all(
+  const createdJobResults = await Promise.allSettled(
     Array.from({ length: count }, async () => {
       const remoteJob = await createRemoteVideoJob({
         prompt,
@@ -128,7 +254,28 @@ export async function createGenerations(input: CreateGenerationInput) {
     }),
   );
 
-  await upsertRecords(createdJobs);
+  const createdJobs = createdJobResults
+    .filter((result): result is PromiseFulfilledResult<GenerationRecord> => result.status === "fulfilled")
+    .map((result) => result.value);
+
+  if (createdJobs.length > 0) {
+    await upsertRecords(createdJobs);
+  }
+
+  const failedJobs = createdJobResults.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+
+  if (failedJobs.length > 0) {
+    console.warn(
+      `Certaines generations Sora ont echoue a la creation (${failedJobs.length}/${count}).`,
+      failedJobs.map((result) => (result.reason instanceof Error ? result.reason.message : String(result.reason))),
+    );
+  }
+
+  if (createdJobs.length === 0) {
+    const firstFailure = failedJobs[0]?.reason;
+    throw firstFailure instanceof Error ? firstFailure : new Error("La creation des generations a echoue.");
+  }
+
   return createdJobs.toSorted((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
@@ -212,6 +359,187 @@ export async function editGeneration(sourceId: string, editPrompt: string) {
   return newRecord;
 }
 
+export async function cloneGenerationVoice(
+  generationId: string,
+  input: {
+    audio: {
+      buffer: Buffer;
+      mimeType: string;
+      originalName: string;
+    };
+    name?: string;
+    description?: string;
+    labels?: Record<string, string>;
+    removeBackgroundNoise?: boolean;
+  },
+) {
+  assertElevenLabsReady();
+
+  const record = await readRecord(generationId);
+  ensureCompletedGeneration(record);
+
+  if (record.elevenlabsVoiceId) {
+    throw new Error("Une voix clonee existe deja pour cette generation. Supprimez-la avant d'en creer une nouvelle.");
+  }
+
+  if (!input.audio.buffer.length) {
+    throw new Error("Le fichier audio est vide.");
+  }
+
+  const audioFormat = resolveAudioFormat(input.audio.originalName, input.audio.mimeType);
+
+  const cloneName = input.name?.trim() || `ugc-hook-${generationId}`;
+  const description = input.description?.trim() || `Voice clone for generation ${generationId}`;
+  const labels = {
+    project: "ugc-generation",
+    generation_id: generationId,
+    ...(input.labels ?? {}),
+  };
+
+  const voice = await createVoiceClone({
+    name: cloneName,
+    description,
+    labels,
+    removeBackgroundNoise: input.removeBackgroundNoise ?? true,
+    audio: {
+      buffer: input.audio.buffer,
+      fileName: input.audio.originalName,
+      mimeType: audioFormat.contentType,
+    },
+  });
+
+  try {
+    const hookAudioFileName = buildHookAudioFileName(generationId, input.audio.originalName, audioFormat.contentType);
+    const hookAudioUrl = await uploadAudio(
+      `audio/hooks/${hookAudioFileName}`,
+      input.audio.buffer,
+      audioFormat.contentType,
+    );
+
+    const updatedRecord: GenerationRecord = {
+      ...record,
+      hookAudioUrl,
+      hookAudioFileName,
+      elevenlabsVoiceId: voice.voiceId,
+      elevenlabsVoiceName: voice.name ?? cloneName,
+      updatedAt: nowIsoString(),
+    };
+
+    await upsertRecord(updatedRecord);
+
+    return {
+      record: updatedRecord,
+      voice,
+    };
+  } catch (error) {
+    try {
+      await deleteVoice(voice.voiceId);
+    } catch {
+      // Best effort cleanup only.
+    }
+
+    throw error;
+  }
+}
+
+export async function getGenerationVoice(generationId: string) {
+  assertElevenLabsReady();
+
+  const record = await readRecord(generationId);
+
+  if (!record.elevenlabsVoiceId) {
+    throw new Error("Aucune voix clonee n'est associee a cette generation.");
+  }
+
+  return {
+    record,
+    voice: await getVoice(record.elevenlabsVoiceId),
+  };
+}
+
+export async function generateGenerationVoiceover(
+  generationId: string,
+  input: {
+    text: string;
+    modelId?: string;
+    outputFormat?: string;
+    voiceSettings?: Partial<ElevenLabsVoiceSettings>;
+  },
+) {
+  assertElevenLabsReady();
+
+  const record = await readRecord(generationId);
+
+  if (!record.elevenlabsVoiceId) {
+    throw new Error("Clonez d'abord une voix pour cette generation.");
+  }
+
+  const text = input.text.trim();
+  if (!text) {
+    throw new Error("Le texte du voiceover est obligatoire.");
+  }
+
+  const outputFormat = input.outputFormat?.trim() || DEFAULT_ELEVENLABS_OUTPUT_FORMAT;
+  const modelId = input.modelId?.trim() || DEFAULT_ELEVENLABS_MODEL;
+  const voiceSettings = mergeVoiceSettings(input.voiceSettings);
+
+  const audio = await convertTextToSpeech({
+    voiceId: record.elevenlabsVoiceId,
+    text,
+    modelId,
+    outputFormat,
+    voiceSettings,
+  });
+
+  const voiceoverFileName = buildVoiceoverFileName(generationId, outputFormat);
+  const voiceoverUrl = await uploadAudio(
+    `audio/voiceovers/${voiceoverFileName}`,
+    audio.buffer,
+    audio.contentType,
+  );
+
+  const updatedRecord: GenerationRecord = {
+    ...record,
+    voiceoverUrl,
+    voiceoverFileName,
+    voiceoverScript: text,
+    updatedAt: nowIsoString(),
+  };
+
+  await upsertRecord(updatedRecord);
+
+  return {
+    record: updatedRecord,
+    contentType: audio.contentType,
+  };
+}
+
+export async function deleteGenerationVoice(generationId: string) {
+  assertElevenLabsReady();
+
+  const record = await readRecord(generationId);
+
+  if (!record.elevenlabsVoiceId) {
+    throw new Error("Aucune voix clonee n'est associee a cette generation.");
+  }
+
+  const remoteDeleted = await deleteVoice(record.elevenlabsVoiceId);
+
+  const updatedRecord: GenerationRecord = {
+    ...record,
+    elevenlabsVoiceId: undefined,
+    elevenlabsVoiceName: undefined,
+    updatedAt: nowIsoString(),
+  };
+
+  await upsertRecord(updatedRecord);
+
+  return {
+    record: updatedRecord,
+    remoteDeleted,
+  };
+}
+
 export async function refreshGeneration(record: GenerationRecord): Promise<GenerationRecord> {
   const remoteJob = await retrieveRemoteVideoJob(record.id);
   const refreshed = mapRemoteJobToRecord(remoteJob, record);
@@ -224,8 +552,9 @@ export async function refreshGeneration(record: GenerationRecord): Promise<Gener
     withVideo = refreshed;
   }
 
-  await upsertRecord(withVideo);
-  return withVideo;
+  const recordToPersist = await preservePersistedVideoFields(withVideo);
+  await upsertRecord(recordToPersist);
+  return recordToPersist;
 }
 
 export async function listGenerations(options?: { refresh?: boolean }) {
@@ -235,7 +564,7 @@ export async function listGenerations(options?: { refresh?: boolean }) {
     return records;
   }
 
-  const activeRecords = records.filter((record) => record.status === "queued" || record.status === "in_progress");
+  const activeRecords = records.filter(shouldRefreshRecord);
 
   const refreshedRecords = await Promise.allSettled(activeRecords.map((record) => refreshGeneration(record)));
   const refreshedById = new Map(
@@ -250,8 +579,22 @@ export async function listGenerations(options?: { refresh?: boolean }) {
 }
 
 export async function getDashboardState() {
-  return {
-    envReady: hasOpenAiApiKey(),
-    records: await listGenerations({ refresh: true }),
-  };
+  try {
+    return {
+      envReady: hasOpenAiApiKey(),
+      records: await listGenerations({ refresh: true }),
+      backendError: undefined,
+    };
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Impossible de recuperer les generations.";
+
+    console.error("Erreur chargement dashboard:", error);
+
+    return {
+      envReady: hasOpenAiApiKey(),
+      records: [] as GenerationRecord[],
+      backendError: message,
+    };
+  }
 }

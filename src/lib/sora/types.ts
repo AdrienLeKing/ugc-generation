@@ -11,6 +11,14 @@ export type GenerationStatus =
 
 export type InputMode = "text" | "text_plus_image";
 
+export type ElevenLabsVoiceSettings = {
+  stability: number;
+  similarityBoost: number;
+  style: number;
+  useSpeakerBoost: boolean;
+  speed?: number;
+};
+
 export type GenerationRecord = {
   id: string;
   prompt: string;
@@ -24,6 +32,13 @@ export type GenerationRecord = {
   inputImageOriginalName?: string;
   inputImageWidth?: number;
   inputImageHeight?: number;
+  hookAudioUrl?: string;
+  hookAudioFileName?: string;
+  elevenlabsVoiceId?: string;
+  elevenlabsVoiceName?: string;
+  voiceoverUrl?: string;
+  voiceoverFileName?: string;
+  voiceoverScript?: string;
   videoUrl?: string;
   videoFileName?: string;
   errorMessage?: string;
@@ -49,6 +64,13 @@ export type GenerationRow = {
   input_image_original_name: string | null;
   input_image_width: number | null;
   input_image_height: number | null;
+  hook_audio_url: string | null;
+  hook_audio_file_name: string | null;
+  elevenlabs_voice_id: string | null;
+  elevenlabs_voice_name: string | null;
+  voiceover_url: string | null;
+  voiceover_file_name: string | null;
+  voiceover_script: string | null;
   video_url: string | null;
   video_file_name: string | null;
   error_message: string | null;
@@ -82,6 +104,7 @@ export type CreateGenerationInput = {
 export type RemoteVideoJob = {
   id: string;
   status?: string;
+  progress?: number;
   progress_percent?: number;
   created_at?: number | string;
   completed_at?: number | string;

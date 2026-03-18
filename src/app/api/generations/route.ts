@@ -23,6 +23,7 @@ export async function GET() {
       envReady: dashboard.envReady,
       pollIntervalMs: POLL_INTERVAL_MS,
       items: dashboard.records,
+      backendError: dashboard.backendError,
     });
   } catch (error) {
     return errorResponse(error);

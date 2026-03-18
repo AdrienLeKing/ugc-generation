@@ -1,4 +1,4 @@
-import type { SoraModel, VerticalSize } from "@/lib/sora/types";
+import type { ElevenLabsVoiceSettings, SoraModel, VerticalSize } from "@/lib/sora/types";
 
 export const POLL_INTERVAL_MS = 10_000;
 
@@ -47,3 +47,12 @@ export const VERTICAL_SIZE_OPTIONS: Array<{
 ];
 
 export const MAX_BATCH_SIZE = 4;
+
+export const DEFAULT_ELEVENLABS_MODEL = "eleven_multilingual_v2";
+export const DEFAULT_ELEVENLABS_OUTPUT_FORMAT = "mp3_44100_128";
+export const DEFAULT_ELEVENLABS_VOICE_SETTINGS: ElevenLabsVoiceSettings = {
+  stability: 0.5,
+  similarityBoost: 0.8,
+  style: 0.3,
+  useSpeakerBoost: true,
+};
