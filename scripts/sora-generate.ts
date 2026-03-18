@@ -1,5 +1,7 @@
 import process from "node:process";
 
+import { DEFAULT_DURATION_SECONDS } from "../src/lib/sora/config";
+
 function readArgument(flag: string) {
   const index = process.argv.indexOf(flag);
   if (index === -1) {
@@ -16,10 +18,11 @@ function hasFlag(flag: string) {
 function printHelp() {
   console.log(`
 Commande:
-  npm run sora -- --spoken "Texte prononce" --scene "Scene et settings" --image /chemin/image.jpg [--seconds 8] [--model sora-2]
+  npm run sora -- --spoken "Texte prononcé" --scene "Scène et settings" [--image /chemin/image.jpg] [--seconds ${DEFAULT_DURATION_SECONDS}] [--model sora-2]
 
 Exemples:
   npm run sora -- --spoken "Stop, si ta peau tiraille apres la douche..." --scene "Face camera, salle de bain lumineuse, ton naturel" --image "/Users/adrien/image.jpg"
+  npm run sora -- --spoken "Je te montre pourquoi j'ai garde ca dans ma routine." --scene "Selfie main, lumiere du matin, ton naturel" --model sora-2
   npm run sora -- --spoken "J'ai teste ca pendant 7 jours." --scene "Cuisine claire, leger mouvement smartphone, energie UGC premium" --image "/Users/adrien/image.jpg" --seconds 12 --model sora-2-pro
 `);
 }
@@ -45,7 +48,7 @@ async function main() {
     spokenText,
     sceneDescription,
     model: readArgument("--model"),
-    seconds: Number(readArgument("--seconds") || 8),
+    seconds: Number(readArgument("--seconds") || DEFAULT_DURATION_SECONDS),
     imagePath: readArgument("--image"),
   });
 

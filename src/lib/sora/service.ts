@@ -238,16 +238,13 @@ export async function createGenerations(input: CreateGenerationInput) {
     throw new Error("Format vertical non pris en charge.");
   }
 
-  if (!referenceImage) {
-    throw new Error("La photo de la creatrice est obligatoire.");
-  }
-
   const prompt = buildHookPrompt({
     spokenText,
     sceneDescription,
     presetId: input.hookPresetId,
+    hasReferenceImage: Boolean(referenceImage),
   });
-  const imageUrl = await uploadImage(referenceImage.buffer, referenceImage.fileName);
+  const imageUrl = referenceImage ? await uploadImage(referenceImage.buffer, referenceImage.fileName) : undefined;
   const baseRecord = {
     prompt,
     spokenText,
@@ -255,11 +252,11 @@ export async function createGenerations(input: CreateGenerationInput) {
     model,
     seconds,
     size,
-    inputMode: "text_plus_image" as const,
+    inputMode: (referenceImage ? "text_plus_image" : "text") as const,
     inputImageUrl: imageUrl,
-    inputImageOriginalName: referenceImage.originalName,
-    inputImageWidth: referenceImage.width,
-    inputImageHeight: referenceImage.height,
+    inputImageOriginalName: referenceImage?.originalName,
+    inputImageWidth: referenceImage?.width,
+    inputImageHeight: referenceImage?.height,
     approvalStatus: "draft" as const,
     approvedAt: undefined,
     voiceCloneStatus: "idle" as const,
@@ -305,11 +302,10 @@ export async function createGenerationsFromFormData(formData: FormData) {
   const seconds = Number(formData.get("seconds") || DEFAULT_DURATION_SECONDS);
   const maybeFile = formData.get("referenceImage");
 
-  if (!(maybeFile instanceof File) || maybeFile.size === 0) {
-    throw new Error("La photo de la creatrice est obligatoire.");
-  }
-
-  const referenceImage = await prepareReferenceImage(maybeFile, DEFAULT_SIZE);
+  const referenceImage =
+    maybeFile instanceof File && maybeFile.size > 0
+      ? await prepareReferenceImage(maybeFile, DEFAULT_SIZE)
+      : undefined;
 
   return createGenerations({
     spokenText,
@@ -331,11 +327,9 @@ export async function createGenerationsFromCli(input: {
   const requestedModel = input.model;
   const model: SoraModel = requestedModel && isSupportedModel(requestedModel) ? requestedModel : DEFAULT_MODEL;
 
-  if (!input.imagePath) {
-    throw new Error("Ajoutez --image avec la photo de la creatrice.");
-  }
-
-  const referenceImage = await prepareReferenceImageFromPath(input.imagePath, DEFAULT_SIZE);
+  const referenceImage = input.imagePath
+    ? await prepareReferenceImageFromPath(input.imagePath, DEFAULT_SIZE)
+    : undefined;
 
   return createGenerations({
     spokenText: input.spokenText,

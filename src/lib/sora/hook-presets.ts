@@ -108,12 +108,17 @@ export function buildHookPrompt(input: {
   spokenText: string;
   sceneDescription: string;
   presetId?: string | null;
+  hasReferenceImage?: boolean;
 }) {
   const preset = getHookPreset(input.presetId);
 
   return [
-    "Create a short vertical 9:16 UGC hook video using the provided reference image as the exact identity of the speaking creator.",
-    "Keep the face consistent with the reference image and frame the creator speaking directly to camera.",
+    input.hasReferenceImage
+      ? "Create a short vertical 9:16 UGC hook video using the provided reference image as the exact identity of the speaking creator."
+      : "Create a short vertical 9:16 UGC hook video of a believable creator speaking directly to camera.",
+    input.hasReferenceImage
+      ? "Keep the face consistent with the reference image and frame the creator speaking directly to camera."
+      : "Frame the creator speaking directly to camera with a realistic smartphone-native look.",
     `The creator must say exactly this line with clear lip sync and natural speaking rhythm: "${input.spokenText}"`,
     `UGC shooting preset: ${preset.name}. ${preset.summary}`,
     `Shot context and scene details: ${input.sceneDescription}`,

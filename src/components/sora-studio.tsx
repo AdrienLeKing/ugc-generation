@@ -787,7 +787,7 @@ export function SoraStudio() {
                   <h2>Etape 1 — Hook Sora</h2>
                   <p>Image, texte prononce, scene et settings, puis generation du hook vertical.</p>
                 </div>
-                <span className="badge badge-neutral">Defaut: 4 secondes</span>
+                <span className="badge badge-neutral">Défaut: 4 secondes</span>
               </div>
 
               <form className="wizard-form" onSubmit={handleHookSubmit}>
@@ -802,14 +802,17 @@ export function SoraStudio() {
                           className={`preset-card ${isActive ? "is-active" : ""}`}
                           key={preset.id}
                           onClick={() => handlePresetSelect(preset.id)}
+                          title={`${preset.summary} ${preset.shootingContext}`}
                           type="button"
                         >
                           <div className="preset-card-head">
                             <strong>{preset.name}</strong>
                             <span className="badge badge-neutral">{preset.badge}</span>
                           </div>
-                          <p>{preset.summary}</p>
-                          <small>{preset.shootingContext}</small>
+                          <div className="preset-tooltip" role="presentation">
+                            <p>{preset.summary}</p>
+                            <small>{preset.shootingContext}</small>
+                          </div>
                         </button>
                       );
                     })}
@@ -817,7 +820,7 @@ export function SoraStudio() {
                 </div>
 
                 <label className="field">
-                  <span>Texte prononce</span>
+                  <span>Texte prononcé</span>
                   <textarea
                     onChange={(event) => setSpokenText(event.target.value)}
                     placeholder='Exemple: "Stop, si ta peau tiraille apres la douche, il faut voir ca."'
@@ -828,7 +831,7 @@ export function SoraStudio() {
                 </label>
 
                 <label className="field">
-                  <span>Scene et details produit</span>
+                  <span>Scène et détails produit</span>
                   <textarea
                     onChange={(event) => setSceneDescription(event.target.value)}
                     placeholder={selectedPreset.sceneStarter}
@@ -842,14 +845,9 @@ export function SoraStudio() {
                   </small>
                 </label>
 
-                <div className="preset-guidance">
-                  <strong>{selectedPreset.name}</strong>
-                  <p>{selectedPreset.shootingContext}</p>
-                </div>
-
                 <div className="field-grid">
                   <label className="field">
-                    <span>Modele</span>
+                    <span>Modèle</span>
                     <select value={model} onChange={(event) => setModel(event.target.value as SoraModel)}>
                       {MODEL_OPTIONS.map((option) => (
                         <option key={option.value} value={option.value}>
@@ -861,7 +859,7 @@ export function SoraStudio() {
                   </label>
 
                   <label className="field">
-                    <span>Duree</span>
+                    <span>Durée</span>
                     <select value={seconds} onChange={(event) => setSeconds(Number(event.target.value))}>
                       {DURATION_OPTIONS.map((option) => (
                         <option key={option.value} value={option.value}>
@@ -874,8 +872,8 @@ export function SoraStudio() {
 
                 <label className="field">
                   <span>Photo de la creatrice</span>
-                  <input accept="image/*" onChange={handleImageChange} required type="file" />
-                  <small>La photo est recadree automatiquement en 9:16 avant envoi a Sora.</small>
+                  <input accept="image/*" onChange={handleImageChange} type="file" />
+                  <small>Optionnel: si tu ajoutes une photo, elle sert d&apos;ancrage visuel et sera recadrée en 9:16 avant envoi à Sora.</small>
                 </label>
 
                 {referencePreviewUrl ? (

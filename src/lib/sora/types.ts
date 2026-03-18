@@ -144,7 +144,7 @@ export type CreateGenerationInput = {
   hookPresetId?: string;
   model: SoraModel;
   seconds: number;
-  referenceImage: PreparedImage;
+  referenceImage?: PreparedImage;
 };
 
 export type RemoteVideoJob = {
