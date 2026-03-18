@@ -210,13 +210,14 @@ function buildVoiceoverFileName(generationId: string, outputFormat: string) {
   return `voiceover-${generationId}.${extension}`;
 }
 
-export async function createGenerations(input: CreateGenerationInput) {
+export async function createGenerations(input: CreateGenerationInput & { userId?: string }) {
   const spokenText = input.spokenText.trim();
   const sceneDescription = input.sceneDescription.trim();
   const model = input.model || DEFAULT_MODEL;
   const seconds = input.seconds || DEFAULT_DURATION_SECONDS;
   const size = DEFAULT_SIZE;
   const referenceImage = input.referenceImage;
+  const userId = input.userId;
 
   if (!spokenText) {
     throw new Error("Le texte prononce est obligatoire.");
@@ -247,12 +248,13 @@ export async function createGenerations(input: CreateGenerationInput) {
   const imageUrl = referenceImage ? await uploadImage(referenceImage.buffer, referenceImage.fileName) : undefined;
   const baseRecord = {
     prompt,
+    userId,
     spokenText,
     sceneDescription,
     model,
     seconds,
     size,
-    inputMode: (referenceImage ? "text_plus_image" : "text") as const,
+    inputMode: referenceImage ? ("text_plus_image" as const) : ("text" as const),
     inputImageUrl: imageUrl,
     inputImageOriginalName: referenceImage?.originalName,
     inputImageWidth: referenceImage?.width,
@@ -294,7 +296,7 @@ export async function createGenerations(input: CreateGenerationInput) {
   return createdJobs.toSorted((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
-export async function createGenerationsFromFormData(formData: FormData) {
+export async function createGenerationsFromFormData(formData: FormData, userId?: string) {
   const spokenText = String(formData.get("spokenText") || "");
   const sceneDescription = String(formData.get("sceneDescription") || "");
   const hookPresetId = String(formData.get("hookPresetId") || "");
@@ -314,6 +316,7 @@ export async function createGenerationsFromFormData(formData: FormData) {
     model: isSupportedModel(model) ? model : DEFAULT_MODEL,
     seconds,
     referenceImage,
+    userId,
   });
 }
 
@@ -594,8 +597,8 @@ export async function refreshGeneration(record: GenerationRecord): Promise<Gener
   return recordToPersist;
 }
 
-export async function listGenerations(options?: { refresh?: boolean }) {
-  const records = await readRecords();
+export async function listGenerations(options?: { refresh?: boolean; userId?: string }) {
+  const records = await readRecords(options?.userId);
 
   if (!options?.refresh || !hasOpenAiApiKey()) {
     return records;
@@ -1006,12 +1009,12 @@ export async function finalizeDemoForGeneration(
   }
 }
 
-export async function getDashboardState() {
+export async function getDashboardState(userId?: string) {
   try {
     return {
       envReady: hasOpenAiApiKey(),
       elevenLabsReady: hasElevenLabsApiKey(),
-      records: await listGenerations({ refresh: true }),
+      records: await listGenerations({ refresh: true, userId }),
       backendError: undefined,
     };
   } catch (error) {

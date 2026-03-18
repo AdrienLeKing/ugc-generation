@@ -23,6 +23,7 @@ export type ElevenLabsVoiceSettings = {
 
 export type GenerationRecord = {
   id: string;
+  userId?: string;
   prompt: string;
   spokenText?: string;
   sceneDescription?: string;
@@ -65,6 +66,7 @@ export type GenerationRecord = {
 
 export type GenerationRow = {
   id: string;
+  user_id: string | null;
   prompt: string;
   spoken_text: string | null;
   scene_description: string | null;

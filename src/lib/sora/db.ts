@@ -5,13 +5,19 @@ import type { DemoAsset, DemoAssetRow, GenerationRecord, GenerationRow } from "@
 const TABLE = "generations";
 const DEMOS_TABLE = "demo_assets";
 
-export async function readRecords(): Promise<GenerationRecord[]> {
+export async function readRecords(userId?: string): Promise<GenerationRecord[]> {
   const supabase = getSupabase() as any;
-  const { data, error } = await supabase
+  let query = supabase
     .schema("ugc_generation")
     .from(TABLE)
     .select("*")
     .order("created_at", { ascending: false });
+
+  if (userId) {
+    query = query.eq("user_id", userId);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     throw new Error(`Erreur lecture generations: ${error.message}`);
@@ -20,14 +26,19 @@ export async function readRecords(): Promise<GenerationRecord[]> {
   return (data as GenerationRow[]).map(toRecord);
 }
 
-export async function readRecord(id: string): Promise<GenerationRecord> {
+export async function readRecord(id: string, userId?: string): Promise<GenerationRecord> {
   const supabase = getSupabase() as any;
-  const { data, error } = await supabase
+  let query = supabase
     .schema("ugc_generation")
     .from(TABLE)
     .select("*")
-    .eq("id", id)
-    .single();
+    .eq("id", id);
+
+  if (userId) {
+    query = query.eq("user_id", userId);
+  }
+
+  const { data, error } = await query.single();
 
   if (error) {
     throw new Error(`Generation introuvable (${id}): ${error.message}`);

@@ -34,6 +34,7 @@ function normalizeAsyncStatus(value: string | null | undefined): AsyncAssetStatu
 export function toRecord(row: GenerationRow): GenerationRecord {
   return {
     id: row.id,
+    userId: row.user_id ?? undefined,
     prompt: row.prompt,
     spokenText: row.spoken_text ?? undefined,
     sceneDescription: row.scene_description ?? undefined,
@@ -78,6 +79,7 @@ export function toRecord(row: GenerationRow): GenerationRecord {
 export function toDbRow(record: GenerationRecord): Omit<GenerationRow, "updated_at"> {
   return {
     id: record.id,
+    user_id: record.userId ?? null,
     prompt: record.prompt,
     spoken_text: record.spokenText ?? null,
     scene_description: record.sceneDescription ?? null,

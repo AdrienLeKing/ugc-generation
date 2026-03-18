@@ -15,6 +15,7 @@ import {
   getHookPreset,
   type HookPresetId,
 } from "@/lib/sora/hook-presets";
+import { getBrowserSupabase } from "@/lib/supabase/browser";
 import type { DemoAsset, GenerationRecord, SoraModel } from "@/lib/sora/types";
 
 type DashboardResponse = {
@@ -23,6 +24,7 @@ type DashboardResponse = {
   pollIntervalMs: number;
   items: GenerationRecord[];
   backendError?: string;
+  user?: { email?: string } | null;
 };
 
 type DemoLibraryResponse = {
@@ -251,6 +253,7 @@ export function SoraStudio() {
   const [editingDemoName, setEditingDemoName] = useState("");
   const [editingDemoDefaultScript, setEditingDemoDefaultScript] = useState("");
   const [savingDemoEdit, setSavingDemoEdit] = useState(false);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
   const createDemoFormRef = useRef<HTMLFormElement | null>(null);
   const intervalRef = useRef<number | null>(null);
 
@@ -265,6 +268,11 @@ export function SoraStudio() {
   const recentHooks = items.slice(0, 6);
   const readyStep3 = isStep3Unlocked(selectedHook);
 
+  async function handleLogout() {
+    await getBrowserSupabase().auth.signOut();
+    window.location.href = "/login";
+  }
+
   function applyDashboardPayload(payload: DashboardResponse) {
     startTransition(() => {
       setItems(payload.items);
@@ -273,6 +281,10 @@ export function SoraStudio() {
       setPollIntervalMs(payload.pollIntervalMs);
       setSelectedHookId((currentId) => findResumeHookId(payload.items, currentId));
     });
+
+    if (payload.user?.email) {
+      setUserEmail(payload.user.email);
+    }
 
     setDashboardError(payload.backendError ?? null);
   }
@@ -678,6 +690,15 @@ export function SoraStudio() {
   return (
     <main className="page-shell">
       <div className="page-backdrop" />
+
+      {userEmail ? (
+        <div className="user-bar">
+          <span className="user-email">{userEmail}</span>
+          <button className="logout-button" onClick={handleLogout} type="button">
+            Deconnexion
+          </button>
+        </div>
+      ) : null}
 
       <section className="hero-panel">
         <div className="hero-copy">
