@@ -13,6 +13,7 @@ import {
   DEFAULT_HOOK_PRESET_ID,
   HOOK_PRESETS,
   getHookPreset,
+  isCustomHookPreset,
   type HookPresetId,
 } from "@/lib/sora/hook-presets";
 import { getBrowserSupabase } from "@/lib/supabase/browser";
@@ -239,6 +240,7 @@ export function SoraStudio() {
   const [editDemoError, setEditDemoError] = useState<string | null>(null);
   const [finalizeError, setFinalizeError] = useState<string | null>(null);
   const [submittingHook, setSubmittingHook] = useState(false);
+  const [pendingHookPreview, setPendingHookPreview] = useState<GenerationRecord | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingDemos, setLoadingDemos] = useState(false);
   const [creatingDemo, setCreatingDemo] = useState(false);
@@ -259,6 +261,7 @@ export function SoraStudio() {
 
   const selectedHook = items.find((item) => item.id === selectedHookId) ?? null;
   const selectedPreset = getHookPreset(hookPresetId);
+  const isCustomPreset = isCustomHookPreset(hookPresetId);
   const hasSelectedHook = Boolean(selectedHook);
   const persistedSelectedDemoId = selectedHook?.selectedDemoId ?? "";
   const persistedDemoScript = selectedHook?.demoScriptDraft ?? "";
@@ -266,6 +269,7 @@ export function SoraStudio() {
   const activeCount = items.filter((item) => item.status === "queued" || item.status === "in_progress").length;
   const completedHooks = items.filter((item) => item.status === "completed");
   const readyStep3 = isStep3Unlocked(selectedHook);
+  const historyItems = pendingHookPreview ? [pendingHookPreview, ...items] : items;
 
   async function handleLogout() {
     await getBrowserSupabase().auth.signOut();
@@ -432,7 +436,14 @@ export function SoraStudio() {
 
     setHookPresetId(nextPresetId);
 
-    if (!sceneDescription.trim() || sceneDescription === previousPreset.sceneStarter) {
+    if (isCustomHookPreset(nextPresetId)) {
+      if (!sceneDescription.trim() || sceneDescription === previousPreset.sceneStarter) {
+        setSceneDescription("");
+      }
+      return;
+    }
+
+    if (!sceneDescription.trim() || sceneDescription === previousPreset.sceneStarter || isCustomHookPreset(hookPresetId)) {
       setSceneDescription(nextPreset.sceneStarter);
     }
   }
@@ -446,6 +457,52 @@ export function SoraStudio() {
     setSelectedStep(2);
   }
 
+  function buildPendingHookPreview(input: { spokenText: string; sceneDescription: string }) {
+    const now = new Date().toISOString();
+
+    return {
+      id: `pending-${now}`,
+      prompt: input.spokenText,
+      spokenText: input.spokenText,
+      sceneDescription: input.sceneDescription,
+      model,
+      seconds,
+      size: "720x1280",
+      status: "in_progress" as const,
+      progressPercent: 8,
+      inputMode: referenceImage ? "text_plus_image" as const : "text" as const,
+      inputImageUrl: undefined,
+      inputImageOriginalName: referenceImage?.name,
+      inputImageWidth: undefined,
+      inputImageHeight: undefined,
+      approvalStatus: "draft" as const,
+      approvedAt: undefined,
+      voiceCloneStatus: "idle" as const,
+      hookAudioUrl: undefined,
+      hookAudioFileName: undefined,
+      elevenlabsVoiceId: undefined,
+      elevenlabsVoiceName: undefined,
+      selectedDemoId: undefined,
+      demoScriptDraft: undefined,
+      voiceoverUrl: undefined,
+      voiceoverFileName: undefined,
+      voiceoverScript: undefined,
+      finalVideoStatus: "idle" as const,
+      finalVideoUrl: undefined,
+      finalVideoFileName: undefined,
+      videoUrl: undefined,
+      videoFileName: undefined,
+      errorMessage: undefined,
+      createdAt: now,
+      updatedAt: now,
+      remoteCreatedAt: undefined,
+      remoteCompletedAt: undefined,
+      remoteExpiresAt: undefined,
+      sourceVideoId: undefined,
+      editPrompt: undefined,
+    } satisfies GenerationRecord;
+  }
+
   async function handleHookSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSubmittingHook(true);
@@ -453,9 +510,17 @@ export function SoraStudio() {
 
     try {
       const formData = new FormData();
+      const resolvedSceneDescription = isCustomPreset ? sceneDescription : selectedPreset.sceneStarter;
+      const optimisticHook = buildPendingHookPreview({
+        spokenText,
+        sceneDescription: resolvedSceneDescription,
+      });
+
+      setPendingHookPreview(optimisticHook);
+
       formData.set("hookPresetId", hookPresetId);
       formData.set("spokenText", spokenText);
-      formData.set("sceneDescription", sceneDescription);
+      formData.set("sceneDescription", resolvedSceneDescription);
       formData.set("model", model);
       formData.set("seconds", String(seconds));
 
@@ -479,6 +544,14 @@ export function SoraStudio() {
         setSelectedHookId(createdId);
       }
 
+      setPendingHookPreview(null);
+      if (payload.items.length > 0) {
+        setItems((current) => {
+          const next = [...payload.items, ...current.filter((item) => !payload.items.some((created) => created.id === item.id))];
+          return next;
+        });
+      }
+
       setSelectedStep(1);
       setHookPresetId(DEFAULT_HOOK_PRESET_ID);
       setSpokenText("");
@@ -492,6 +565,7 @@ export function SoraStudio() {
 
       await refreshDashboard(false);
     } catch (error) {
+      setPendingHookPreview(null);
       setDashboardError(error instanceof Error ? error.message : "La generation du hook a echoue.");
     } finally {
       setSubmittingHook(false);
@@ -789,20 +863,19 @@ export function SoraStudio() {
                   />
                 </label>
 
-                <label className="field">
-                  <span>Scène et détails produit</span>
-                  <textarea
-                    onChange={(event) => setSceneDescription(event.target.value)}
-                    placeholder={selectedPreset.sceneStarter}
-                    required
-                    rows={4}
-                    value={sceneDescription}
-                  />
-                  <small>
-                    Le preset gere deja la facon de filmer. Ici, ajoute surtout le lieu, le produit, l&apos;energie,
-                    la lumiere et les details utiles a ton offre.
-                  </small>
-                </label>
+                {isCustomPreset ? (
+                  <label className="field">
+                    <span>Preset custom</span>
+                    <textarea
+                      onChange={(event) => setSceneDescription(event.target.value)}
+                      placeholder="Decris ici la scene, le contexte, le rythme, le lieu, la lumiere et les details de tournage."
+                      required
+                      rows={4}
+                      value={sceneDescription}
+                    />
+                    <small>Ce champ n&apos;apparait que pour le preset custom.</small>
+                  </label>
+                ) : null}
 
                 <div className="field-grid">
                   <label className="field">
@@ -1348,17 +1421,17 @@ export function SoraStudio() {
               <h2>Historique des hooks</h2>
               <p>Toutes les generations restent visibles, avec reprise automatique du dernier hook approuve.</p>
             </div>
-            <span className="badge badge-neutral">{items.length} hooks</span>
+            <span className="badge badge-neutral">{historyItems.length} hooks</span>
           </div>
 
           <div className="history-list">
-            {items.length === 0 ? (
+            {historyItems.length === 0 ? (
               <div className="empty-state compact-empty">
                 <h3>Aucun hook</h3>
                 <p>Le premier hook apparaitra ici des qu&apos;il sera cree.</p>
               </div>
             ) : (
-              items.map((item) => (
+              historyItems.map((item) => (
                 <article
                   className={`history-card ${selectedHookId === item.id ? "is-selected" : ""}`}
                   key={item.id}
@@ -1401,7 +1474,7 @@ export function SoraStudio() {
 
                   <div className="history-card-actions">
                     <button className="secondary-button compact-button" onClick={() => focusHook(item)} type="button">
-                      {selectedHookId === item.id ? "Sélectionné" : "Lire ce hook"}
+                      {item.id.startsWith("pending-") ? "Génération..." : selectedHookId === item.id ? "Sélectionné" : "Lire ce hook"}
                     </button>
                     {item.status === "completed" ? (
                       <button className="primary-button compact-button" onClick={() => openHookInValidation(item)} type="button">

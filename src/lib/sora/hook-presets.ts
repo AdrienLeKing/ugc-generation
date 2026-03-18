@@ -3,7 +3,8 @@ export type HookPresetId =
   | "car_dashboard"
   | "car_passenger"
   | "kitchen_counter"
-  | "bathroom_counter";
+  | "bathroom_counter"
+  | "custom";
 
 export type HookPreset = {
   id: HookPresetId;
@@ -21,14 +22,16 @@ export const HOOK_PRESETS: HookPreset[] = [
     name: "Selfie a la main",
     badge: "UGC brut",
     summary:
-      "Telephone tenu en main, face camera, leger tremblement naturel et stabilisation imparfaite comme une vraie prise selfie debout.",
-    shootingContext: "Ideal pour une accroche tres incarnée, spontanee et proche des codes TikTok ou Reels.",
+      "Telephone tenu en main avec la camera frontale, creatrice en train de marcher, legeres vibrations de pas et stabilisation imparfaite comme une vraie video selfie iPhone.",
+    shootingContext:
+      "Ideal pour une accroche tres incarnée, spontanee et proche des codes TikTok ou Reels, comme si la creatrice se filmait en se deplacant reellement.",
     sceneStarter:
-      "Creatrice debout, face camera en selfie, piece du quotidien, ton spontané, lumiere naturelle ou domestique simple.",
+      "Creatrice en train de marcher, face camera en selfie, telephone dans la main, decor du quotidien, ton spontané, lumiere naturelle ou domestique simple.",
     promptDirectives: [
-      "Film with the front smartphone camera held in the creator's hand at arm's length.",
-      "Keep subtle handshake, imperfect stabilization, slight rolling shutter, and tiny autofocus breathing.",
-      "Frame like a real selfie video: head and upper torso, slightly imperfect centering, natural micro-reframes.",
+      "Film with the front iPhone camera held in the creator's hand at arm's length while she is walking.",
+      "Keep realistic step vibrations, hand shake, imperfect stabilization, slight rolling shutter, and tiny autofocus breathing.",
+      "Frame like a real moving selfie video: head and upper torso, slightly imperfect centering, natural micro-reframes caused by walking.",
+      "The creator should feel like she is genuinely moving through space during the take, not standing still.",
       "Preserve an authentic native-phone feel, not a polished commercial camera look.",
     ],
   },
@@ -96,12 +99,28 @@ export const HOOK_PRESETS: HookPreset[] = [
       "Avoid polished cinematic motion; this should feel like a believable creator routine clip.",
     ],
   },
+  {
+    id: "custom",
+    name: "Custom",
+    badge: "Libre",
+    summary:
+      "Preset libre pour decrire toi-meme la scene, le contexte, le rythme et les details de tournage que tu veux.",
+    shootingContext: "A utiliser quand aucun preset ne correspond a ton hook.",
+    sceneStarter: "",
+    promptDirectives: [
+      "Follow the custom scene direction precisely while keeping the result realistic, UGC-native, and smartphone credible.",
+    ],
+  },
 ];
 
 export const DEFAULT_HOOK_PRESET_ID: HookPresetId = "selfie_handheld";
 
 export function getHookPreset(presetId?: string | null) {
   return HOOK_PRESETS.find((preset) => preset.id === presetId) ?? HOOK_PRESETS[0];
+}
+
+export function isCustomHookPreset(presetId?: string | null) {
+  return presetId === "custom";
 }
 
 export function buildHookPrompt(input: {
