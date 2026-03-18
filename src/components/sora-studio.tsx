@@ -265,7 +265,6 @@ export function SoraStudio() {
   const selectedDemo = demos.find((demo) => demo.id === selectedDemoId) ?? null;
   const activeCount = items.filter((item) => item.status === "queued" || item.status === "in_progress").length;
   const completedHooks = items.filter((item) => item.status === "completed");
-  const recentHooks = items.slice(0, 6);
   const readyStep3 = isStep3Unlocked(selectedHook);
 
   async function handleLogout() {
@@ -440,7 +439,11 @@ export function SoraStudio() {
 
   function focusHook(item: GenerationRecord) {
     setSelectedHookId(item.id);
-    setSelectedStep(stepForHook(item));
+  }
+
+  function openHookInValidation(item: GenerationRecord) {
+    setSelectedHookId(item.id);
+    setSelectedStep(2);
   }
 
   async function handleHookSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -699,52 +702,9 @@ export function SoraStudio() {
           </button>
         </div>
       ) : null}
-
-      <section className="hero-panel">
-        <div className="hero-copy">
-          <span className="eyebrow">Wizard hook vers demo finale</span>
-          <h1>Valider un hook Sora, cloner sa voix, puis livrer un MP4 final propre sur une demo.</h1>
-          <p>
-            Le studio suit maintenant un flux guide en trois etapes. Le hook n&apos;active ElevenLabs
-            qu&apos;apres validation explicite, puis la demo finale remplace entierement l&apos;audio d&apos;origine.
-          </p>
-        </div>
-
-        <div className="hero-stats">
-          <div className="stat-card">
-            <span>Hooks actifs</span>
-            <strong>{activeCount}</strong>
-          </div>
-          <div className="stat-card">
-            <span>Bibliotheque demos</span>
-            <strong>{demos.length}</strong>
-          </div>
-          <div className="stat-card">
-            <span>Polling</span>
-            <strong>{Math.round(pollIntervalMs / 1000)} s</strong>
-          </div>
-          <div className="stat-card">
-            <span>Hook actif</span>
-            <strong>{selectedHook ? "Selectionne" : "Aucun"}</strong>
-          </div>
-        </div>
-
-        <div className="hero-status-strip">
-          <span className={`badge badge-${envReady ? "success" : "danger"}`}>
-            {envReady ? "OpenAI pret" : "OpenAI manquant"}
-          </span>
-          <span className={`badge badge-${elevenLabsReady ? "success" : "danger"}`}>
-            {elevenLabsReady ? "ElevenLabs pret" : "ElevenLabs manquant"}
-          </span>
-          {selectedHook ? (
-            <span className={`badge badge-${approvalTone(selectedHook.approvalStatus)}`}>
-              Hook actif: {approvalLabels[selectedHook.approvalStatus]}
-            </span>
-          ) : (
-            <span className="badge badge-neutral">Aucun hook actif</span>
-          )}
-        </div>
-      </section>
+      <header className="app-header">
+        <h1>Bulk UGC</h1>
+      </header>
 
       <section className="wizard-shell">
         <div className="wizard-main">
@@ -752,16 +712,8 @@ export function SoraStudio() {
             <div className="panel-header">
               <div>
                 <h2>Flux guide</h2>
-                <p>Le hook actif determine automatiquement ce que vous pouvez faire ensuite.</p>
+                <p>Crée, choisis puis transforme un hook en démo finale.</p>
               </div>
-              <button
-                className="secondary-button compact-button"
-                disabled={refreshing}
-                onClick={() => void refreshDashboard()}
-                type="button"
-              >
-                {refreshing ? "Actualisation..." : "Actualiser"}
-              </button>
             </div>
 
             <div className="stepper-track">
@@ -907,112 +859,14 @@ export function SoraStudio() {
                   <button className="primary-button" disabled={submittingHook || !envReady} type="submit">
                     {submittingHook ? "Generation du hook..." : "Generer le hook"}
                   </button>
-
-                  <button
-                    className="secondary-button"
-                    disabled={refreshing}
-                    onClick={() => void refreshDashboard()}
-                    type="button"
-                  >
-                    Voir les derniers statuts
-                  </button>
                 </div>
+
+                <p className="creation-counter">
+                  {activeCount > 0
+                    ? `${activeCount} création${activeCount > 1 ? "s" : ""} en cours`
+                    : "Aucune création en cours"}
+                </p>
               </form>
-
-              <div className="inline-summary-grid">
-                <article className="summary-card">
-                  <span>Hooks en cours</span>
-                  <strong>{activeCount}</strong>
-                  <p>Le wizard reste ici tant que vous etes en phase de generation.</p>
-                </article>
-                <article className="summary-card">
-                  <span>Prochaine etape</span>
-                  <strong>Validation manuelle</strong>
-                  <p>Un hook termine ne part pas vers ElevenLabs tant qu&apos;il n&apos;est pas valide.</p>
-                </article>
-              </div>
-
-              <section className="subpanel">
-                <div className="subpanel-header">
-                  <div>
-                    <h3>Hooks créés</h3>
-                    <p>Les hooks apparaissent ici dès qu&apos;ils sont lancés, même pendant la génération.</p>
-                  </div>
-                  <span className="badge badge-neutral">{items.length} hooks</span>
-                </div>
-
-                <div className="hook-catalog">
-                  {recentHooks.length === 0 ? (
-                    <div className="empty-state compact-empty">
-                      <h3>Aucun hook pour le moment</h3>
-                      <p>Le premier hook lancé apparaîtra ici avec son statut et son aperçu.</p>
-                    </div>
-                  ) : (
-                    recentHooks.map((item) => (
-                      <article
-                        className={`hook-card ${selectedHookId === item.id ? "is-selected" : ""}`}
-                        key={item.id}
-                      >
-                        <div className="hook-card-head">
-                          <div>
-                            <span className="eyebrow">{modelLabel(item.model)} · {item.seconds}s</span>
-                            <h3>{copyForHookCard(item)}</h3>
-                          </div>
-                          <div className="hook-card-badges">
-                            <span className={`badge badge-${generationTone(item.status)}`}>
-                              {hookStatusLabels[item.status]}
-                            </span>
-                            <span className={`badge badge-${approvalTone(item.approvalStatus)}`}>
-                              {approvalLabels[item.approvalStatus]}
-                            </span>
-                          </div>
-                        </div>
-
-                        <p className="hook-card-scene">{item.sceneDescription ?? "Pas de description de scene."}</p>
-
-                        {item.videoUrl ? (
-                          <video
-                            className="video-preview compact-video"
-                            controls
-                            playsInline
-                            preload="metadata"
-                            src={item.videoUrl}
-                          />
-                        ) : (
-                          <div className="progress-rail compact-progress">
-                            <div
-                              className="progress-bar"
-                              style={{ width: `${Math.max(item.progressPercent, item.status === "completed" ? 100 : 8)}%` }}
-                            />
-                          </div>
-                        )}
-
-                        <div className="hook-card-footer">
-                          <small>
-                            {item.status === "completed"
-                              ? `Prêt le ${formatDate(item.updatedAt)}`
-                              : `Créé le ${formatDate(item.createdAt)}`}
-                          </small>
-                          <div className="hook-card-actions">
-                            <button className="secondary-button compact-button" onClick={() => focusHook(item)} type="button">
-                              {item.status === "completed" ? "Voir ce hook" : "Suivre ce hook"}
-                            </button>
-                            <button
-                              className="secondary-button compact-button"
-                              onClick={() => setSelectedStep(item.status === "completed" ? 2 : 1)}
-                              type="button"
-                            >
-                              {item.status === "completed" ? "Aller à l’étape 2" : "Rester en étape 1"}
-                            </button>
-                          </div>
-                        </div>
-
-                        {item.errorMessage ? <p className="error-inline">{item.errorMessage}</p> : null}
-                      </article>
-                    ))
-                  )}
-                </div>
-              </section>
             </section>
           ) : null}
 
@@ -1505,11 +1359,9 @@ export function SoraStudio() {
               </div>
             ) : (
               items.map((item) => (
-                <button
+                <article
                   className={`history-card ${selectedHookId === item.id ? "is-selected" : ""}`}
                   key={item.id}
-                  onClick={() => focusHook(item)}
-                  type="button"
                 >
                   <div className="history-card-head">
                     <span className={`badge badge-${generationTone(item.status)}`}>
@@ -1523,18 +1375,41 @@ export function SoraStudio() {
                   <strong>{copyForHookCard(item)}</strong>
                   <p>{item.sceneDescription ?? "Pas de description de scene."}</p>
 
+                  {selectedHookId === item.id && item.videoUrl ? (
+                    <video
+                      className="video-preview compact-video history-video"
+                      controls
+                      playsInline
+                      preload="metadata"
+                      src={item.videoUrl}
+                    />
+                  ) : null}
+
                   <div className="history-card-meta">
                     <small>{modelLabel(item.model)} · {item.seconds}s</small>
                     <small>Voix {asyncStatusLabels[item.voiceCloneStatus]}</small>
                   </div>
 
-                  <div className="progress-rail compact-progress">
-                    <div
-                      className="progress-bar"
-                      style={{ width: `${Math.max(item.progressPercent, item.status === "completed" ? 100 : 8)}%` }}
-                    />
+                  {item.videoUrl ? null : (
+                    <div className="progress-rail compact-progress">
+                      <div
+                        className="progress-bar"
+                        style={{ width: `${Math.max(item.progressPercent, item.status === "completed" ? 100 : 8)}%` }}
+                      />
+                    </div>
+                  )}
+
+                  <div className="history-card-actions">
+                    <button className="secondary-button compact-button" onClick={() => focusHook(item)} type="button">
+                      {selectedHookId === item.id ? "Sélectionné" : "Lire ce hook"}
+                    </button>
+                    {item.status === "completed" ? (
+                      <button className="primary-button compact-button" onClick={() => openHookInValidation(item)} type="button">
+                        Utiliser ce hook
+                      </button>
+                    ) : null}
                   </div>
-                </button>
+                </article>
               ))
             )}
           </div>
