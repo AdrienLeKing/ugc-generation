@@ -13,7 +13,7 @@ const execFileAsync = promisify(execFile);
  * Uses ffmpeg under the hood — returns a clean error when the binary is
  * missing so the caller can surface it to the user.
  */
-export async function extractAudioFromMp4(mp4Buffer: ArrayBuffer): Promise<Buffer> {
+export async function extractAudioFromMp4(mp4Buffer: ArrayBuffer | Buffer): Promise<Buffer> {
   let tempDir: string | undefined;
 
   try {
@@ -21,7 +21,7 @@ export async function extractAudioFromMp4(mp4Buffer: ArrayBuffer): Promise<Buffe
     const inputPath = join(tempDir, "input.mp4");
     const outputPath = join(tempDir, "output.mp3");
 
-    await writeFile(inputPath, Buffer.from(mp4Buffer));
+    await writeFile(inputPath, Buffer.isBuffer(mp4Buffer) ? mp4Buffer : Buffer.from(mp4Buffer));
 
     try {
       await execFileAsync("ffmpeg", [

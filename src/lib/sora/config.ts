@@ -3,7 +3,7 @@ import type { ElevenLabsVoiceSettings, SoraModel, VerticalSize } from "@/lib/sor
 export const POLL_INTERVAL_MS = 10_000;
 
 export const DEFAULT_MODEL: SoraModel = "sora-2";
-export const DEFAULT_DURATION_SECONDS = 8;
+export const DEFAULT_DURATION_SECONDS = 4;
 export const DEFAULT_SIZE: VerticalSize = "720x1280";
 
 export const MODEL_OPTIONS: Array<{

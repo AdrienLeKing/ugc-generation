@@ -10,6 +10,8 @@ export type GenerationStatus =
   | "unknown";
 
 export type InputMode = "text" | "text_plus_image";
+export type ApprovalStatus = "draft" | "approved" | "rejected";
+export type AsyncAssetStatus = "idle" | "processing" | "ready" | "failed";
 
 export type ElevenLabsVoiceSettings = {
   stability: number;
@@ -34,13 +36,21 @@ export type GenerationRecord = {
   inputImageOriginalName?: string;
   inputImageWidth?: number;
   inputImageHeight?: number;
+  approvalStatus: ApprovalStatus;
+  approvedAt?: string;
+  voiceCloneStatus: AsyncAssetStatus;
   hookAudioUrl?: string;
   hookAudioFileName?: string;
   elevenlabsVoiceId?: string;
   elevenlabsVoiceName?: string;
+  selectedDemoId?: string;
+  demoScriptDraft?: string;
   voiceoverUrl?: string;
   voiceoverFileName?: string;
   voiceoverScript?: string;
+  finalVideoStatus: AsyncAssetStatus;
+  finalVideoUrl?: string;
+  finalVideoFileName?: string;
   videoUrl?: string;
   videoFileName?: string;
   errorMessage?: string;
@@ -68,13 +78,21 @@ export type GenerationRow = {
   input_image_original_name: string | null;
   input_image_width: number | null;
   input_image_height: number | null;
+  approval_status: string | null;
+  approved_at: string | null;
+  voice_clone_status: string | null;
   hook_audio_url: string | null;
   hook_audio_file_name: string | null;
   elevenlabs_voice_id: string | null;
   elevenlabs_voice_name: string | null;
+  selected_demo_id: string | null;
+  demo_script_draft: string | null;
   voiceover_url: string | null;
   voiceover_file_name: string | null;
   voiceover_script: string | null;
+  final_video_status: string | null;
+  final_video_url: string | null;
+  final_video_file_name: string | null;
   video_url: string | null;
   video_file_name: string | null;
   error_message: string | null;
@@ -85,6 +103,30 @@ export type GenerationRow = {
   remote_expires_at: string | null;
   source_video_id: string | null;
   edit_prompt: string | null;
+};
+
+export type DemoAsset = {
+  id: string;
+  name: string;
+  videoUrl: string;
+  videoFileName: string;
+  defaultScript: string;
+  thumbnailUrl?: string;
+  durationSeconds?: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type DemoAssetRow = {
+  id: string;
+  name: string;
+  video_url: string;
+  video_file_name: string;
+  default_script: string;
+  thumbnail_url: string | null;
+  duration_seconds: number | null;
+  created_at: string;
+  updated_at: string;
 };
 
 export type PreparedImage = {
@@ -99,6 +141,7 @@ export type PreparedImage = {
 export type CreateGenerationInput = {
   spokenText: string;
   sceneDescription: string;
+  hookPresetId?: string;
   model: SoraModel;
   seconds: number;
   referenceImage: PreparedImage;
