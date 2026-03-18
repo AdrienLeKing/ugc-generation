@@ -94,15 +94,20 @@ export async function createVoiceClone(input: {
   labels?: Record<string, string>;
   removeBackgroundNoise?: boolean;
 }) {
+  const safeName = input.name.slice(0, 50);
   const formData = new FormData();
-  formData.set("name", input.name);
+  formData.set("name", safeName);
 
   if (input.description) {
-    formData.set("description", input.description);
+    formData.set("description", input.description.slice(0, 200));
   }
 
   if (input.labels && Object.keys(input.labels).length > 0) {
-    formData.set("labels", JSON.stringify(input.labels));
+    // ElevenLabs enforces a 50-character limit per label key AND value.
+    const truncatedLabels = Object.fromEntries(
+      Object.entries(input.labels).map(([key, value]) => [key.slice(0, 50), value.slice(0, 50)]),
+    );
+    formData.set("labels", JSON.stringify(truncatedLabels));
   }
 
   if (input.removeBackgroundNoise !== undefined) {
@@ -116,9 +121,11 @@ export async function createVoiceClone(input: {
   );
   const blob = new Blob([bytes], { type: input.audio.mimeType });
 
-  console.log(`[elevenlabs] createVoiceClone: buffer=${input.audio.buffer.byteLength}b, blob=${blob.size}b, mime=${input.audio.mimeType}, file=${input.audio.fileName}`);
+  console.log(`[elevenlabs] createVoiceClone: name="${input.name}" (${input.name.length} chars), labels=${JSON.stringify(input.labels)}, buffer=${input.audio.buffer.byteLength}b, blob=${blob.size}b, mime=${input.audio.mimeType}, file=${input.audio.fileName}`);
 
   formData.append("files", blob, input.audio.fileName);
+
+  console.error(`[elevenlabs] >>> CALLING /voices/add name="${safeName}" labels=${formData.get("labels")}`);
 
   const response = await fetch(`${ELEVENLABS_API_BASE_URL}/voices/add`, {
     method: "POST",
@@ -129,7 +136,9 @@ export async function createVoiceClone(input: {
   });
 
   if (!response.ok) {
-    throw new Error(await parseErrorMessage(response));
+    const errorMsg = await parseErrorMessage(response);
+    console.error(`[elevenlabs] <<< ERREUR: ${errorMsg}`);
+    throw new Error(errorMsg);
   }
 
   return mapVoice((await response.json()) as ElevenLabsVoiceResponse);

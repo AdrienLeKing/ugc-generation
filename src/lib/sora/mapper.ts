@@ -6,6 +6,8 @@ import type {
   GenerationRecord,
   GenerationRow,
   GenerationStatus,
+  Persona,
+  PersonaRow,
 } from "@/lib/sora/types";
 
 export function normalizeStatus(value: string | undefined): GenerationStatus {
@@ -73,6 +75,7 @@ export function toRecord(row: GenerationRow): GenerationRecord {
     remoteExpiresAt: row.remote_expires_at ?? undefined,
     sourceVideoId: row.source_video_id ?? undefined,
     editPrompt: row.edit_prompt ?? undefined,
+    personaId: row.persona_id ?? undefined,
   };
 }
 
@@ -117,6 +120,7 @@ export function toDbRow(record: GenerationRecord): Omit<GenerationRow, "updated_
     remote_expires_at: record.remoteExpiresAt ?? null,
     source_video_id: record.sourceVideoId ?? null,
     edit_prompt: record.editPrompt ?? null,
+    persona_id: record.personaId ?? null,
   };
 }
 
@@ -144,5 +148,34 @@ export function toDemoAssetRow(asset: DemoAsset): Omit<DemoAssetRow, "updated_at
     thumbnail_url: asset.thumbnailUrl ?? null,
     duration_seconds: asset.durationSeconds ?? null,
     created_at: asset.createdAt,
+  };
+}
+
+export function toPersona(row: PersonaRow): Persona {
+  return {
+    id: row.id,
+    userId: row.user_id ?? undefined,
+    name: row.name,
+    photoUrl: row.photo_url,
+    photoFileName: row.photo_file_name,
+    photoWidth: row.photo_width ?? undefined,
+    photoHeight: row.photo_height ?? undefined,
+    notes: row.notes ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function toPersonaRow(persona: Persona): Omit<PersonaRow, "updated_at"> {
+  return {
+    id: persona.id,
+    user_id: persona.userId ?? null,
+    name: persona.name,
+    photo_url: persona.photoUrl,
+    photo_file_name: persona.photoFileName,
+    photo_width: persona.photoWidth ?? null,
+    photo_height: persona.photoHeight ?? null,
+    notes: persona.notes ?? null,
+    created_at: persona.createdAt,
   };
 }

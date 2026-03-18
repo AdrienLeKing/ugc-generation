@@ -62,6 +62,7 @@ export type GenerationRecord = {
   remoteExpiresAt?: string;
   sourceVideoId?: string;
   editPrompt?: string;
+  personaId?: string;
 };
 
 export type GenerationRow = {
@@ -105,6 +106,7 @@ export type GenerationRow = {
   remote_expires_at: string | null;
   source_video_id: string | null;
   edit_prompt: string | null;
+  persona_id: string | null;
 };
 
 export type DemoAsset = {
@@ -131,6 +133,32 @@ export type DemoAssetRow = {
   updated_at: string;
 };
 
+export type Persona = {
+  id: string;
+  userId?: string;
+  name: string;
+  photoUrl: string;
+  photoFileName: string;
+  photoWidth?: number;
+  photoHeight?: number;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PersonaRow = {
+  id: string;
+  user_id: string | null;
+  name: string;
+  photo_url: string;
+  photo_file_name: string;
+  photo_width: number | null;
+  photo_height: number | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type PreparedImage = {
   buffer: Buffer;
   mimeType: string;
@@ -147,6 +175,7 @@ export type CreateGenerationInput = {
   model: SoraModel;
   seconds: number;
   referenceImage?: PreparedImage;
+  personaId?: string;
 };
 
 export type RemoteVideoJob = {

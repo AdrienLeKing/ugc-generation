@@ -17,6 +17,7 @@ import {
   insertPersona,
   readDemoAsset,
   readDemoAssets,
+  readPersona,
   readPersonas,
   readRecord,
   readRecords,
@@ -29,7 +30,7 @@ import { deleteVoice, getVoice, createVoiceClone, convertTextToSpeech } from "@/
 import { hasElevenLabsApiKey, hasOpenAiApiKey } from "@/lib/sora/env";
 import { buildHookPrompt } from "@/lib/sora/hook-presets";
 import { normalizeStatus } from "@/lib/sora/mapper";
-import { prepareReferenceImage, prepareReferenceImageFromPath } from "@/lib/sora/media";
+import { prepareReferenceImage, prepareReferenceImageFromPath, prepareReferenceImageFromUrl } from "@/lib/sora/media";
 import { createEditJob, createRemoteVideoJob, downloadRemoteVideo, retrieveRemoteVideoJob } from "@/lib/sora/openai";
 import { uploadAudio, uploadDemoVideo, uploadFinalVideo, uploadImage, uploadPersonaPhoto, uploadVideo } from "@/lib/sora/storage";
 import type {
@@ -220,9 +221,18 @@ export async function createGenerations(input: CreateGenerationInput & { userId?
   const model = input.model || DEFAULT_MODEL;
   const seconds = input.seconds || DEFAULT_DURATION_SECONDS;
   const size = DEFAULT_SIZE;
-  const referenceImage = input.referenceImage;
+  let referenceImage = input.referenceImage;
   const userId = input.userId;
   const personaId = input.personaId;
+
+  if (!referenceImage && personaId) {
+    const persona = await readPersona(personaId);
+    referenceImage = await prepareReferenceImageFromUrl(
+      persona.photoUrl,
+      persona.photoFileName,
+      size,
+    );
+  }
 
   if (!spokenText) {
     throw new Error("Le texte prononce est obligatoire.");

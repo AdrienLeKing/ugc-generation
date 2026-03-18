@@ -1,9 +1,10 @@
 import { getSupabase } from "@/lib/supabase";
-import { toDbRow, toDemoAsset, toDemoAssetRow, toRecord } from "@/lib/sora/mapper";
-import type { DemoAsset, DemoAssetRow, GenerationRecord, GenerationRow } from "@/lib/sora/types";
+import { toDbRow, toDemoAsset, toDemoAssetRow, toPersona, toPersonaRow, toRecord } from "@/lib/sora/mapper";
+import type { DemoAsset, DemoAssetRow, GenerationRecord, GenerationRow, Persona, PersonaRow } from "@/lib/sora/types";
 
 const TABLE = "generations";
 const DEMOS_TABLE = "demo_assets";
+const PERSONAS_TABLE = "personas";
 
 export async function readRecords(userId?: string): Promise<GenerationRecord[]> {
   const supabase = getSupabase() as any;
@@ -130,5 +131,69 @@ export async function updateDemoAsset(asset: DemoAsset): Promise<void> {
 
   if (error) {
     throw new Error(`Erreur mise a jour demo: ${error.message}`);
+  }
+}
+
+export async function readPersonas(userId?: string): Promise<Persona[]> {
+  const supabase = getSupabase() as any;
+  let query = supabase
+    .schema("ugc_generation")
+    .from(PERSONAS_TABLE)
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  if (userId) {
+    query = query.eq("user_id", userId);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    throw new Error(`Erreur lecture personas: ${error.message}`);
+  }
+
+  return (data as PersonaRow[]).map(toPersona);
+}
+
+export async function readPersona(id: string): Promise<Persona> {
+  const supabase = getSupabase() as any;
+  const { data, error } = await supabase
+    .schema("ugc_generation")
+    .from(PERSONAS_TABLE)
+    .select("*")
+    .eq("id", id)
+    .single();
+
+  if (error) {
+    throw new Error(`Persona introuvable (${id}): ${error.message}`);
+  }
+
+  return toPersona(data as PersonaRow);
+}
+
+export async function insertPersona(persona: Persona): Promise<void> {
+  const supabase = getSupabase() as any;
+  const row = toPersonaRow(persona);
+  const { error } = await supabase
+    .schema("ugc_generation")
+    .from(PERSONAS_TABLE)
+    .insert(row as never);
+
+  if (error) {
+    throw new Error(`Erreur creation persona: ${error.message}`);
+  }
+}
+
+export async function updatePersona(persona: Persona): Promise<void> {
+  const supabase = getSupabase() as any;
+  const row = toPersonaRow(persona);
+  const { error } = await supabase
+    .schema("ugc_generation")
+    .from(PERSONAS_TABLE)
+    .update(row as never)
+    .eq("id", persona.id);
+
+  if (error) {
+    throw new Error(`Erreur mise a jour persona: ${error.message}`);
   }
 }

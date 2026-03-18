@@ -48,6 +48,31 @@ export async function prepareReferenceImage(
   };
 }
 
+export async function prepareReferenceImageFromUrl(
+  url: string,
+  originalName: string,
+  size: VerticalSize,
+): Promise<PreparedImage> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Impossible de telecharger l'image de reference.`);
+  }
+  const sourceBuffer = Buffer.from(await response.arrayBuffer());
+  const { buffer, width, height } = await cropToVertical(sourceBuffer, size);
+
+  const safeBaseName = sanitizeFileName(originalName.replace(/\.[^.]+$/, "")) || "reference";
+  const fileName = `${Date.now()}-${safeBaseName}-${width}x${height}.png`;
+
+  return {
+    buffer,
+    mimeType: "image/png",
+    originalName,
+    fileName,
+    width,
+    height,
+  };
+}
+
 export async function prepareReferenceImageFromPath(
   filePath: string,
   size: VerticalSize,

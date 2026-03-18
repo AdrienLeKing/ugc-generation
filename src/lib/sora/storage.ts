@@ -40,6 +40,10 @@ export async function uploadFinalVideo(fileName: string, buffer: Buffer): Promis
   return uploadToBucket(`final/${fileName}`, buffer, "video/mp4");
 }
 
+export async function uploadPersonaPhoto(fileName: string, buffer: Buffer, contentType: string): Promise<string> {
+  return uploadToBucket(`personas/${fileName}`, buffer, contentType || "image/png");
+}
+
 export function getPublicUrl(path: string): string {
   const supabase = getSupabase();
   const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);

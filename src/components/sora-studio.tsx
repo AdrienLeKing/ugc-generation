@@ -1871,15 +1871,27 @@ export function SoraStudio() {
                     </form>
 
                     <div className="asset-columns">
-                      {selectedHook.hookAudioUrl ? (
+                      {selectedHook.videoUrl ? (
                         <article className="asset-stack">
                           <div className="asset-header">
-                            <span>{t.studio.hookAudioLabel}</span>
-                            <a href={selectedHook.hookAudioUrl} rel="noreferrer" target="_blank">
-                              {t.common.download}
+                            <span>{t.studio.hookVideo}</span>
+                            <a download href={selectedHook.videoUrl} rel="noreferrer" target="_blank">
+                              {t.common.download} MP4
                             </a>
                           </div>
-                          <audio className="audio-preview" controls preload="metadata" src={selectedHook.hookAudioUrl} />
+                          <InlineVideoPreview label={t.common.fullscreen} src={selectedHook.videoUrl} />
+                        </article>
+                      ) : null}
+
+                      {selectedDemo ? (
+                        <article className="asset-stack">
+                          <div className="asset-header">
+                            <span>{t.studio.demoChosen}</span>
+                            <a download href={selectedDemo.videoUrl} rel="noreferrer" target="_blank">
+                              {t.common.download} MP4
+                            </a>
+                          </div>
+                          <InlineVideoPreview label={t.common.fullscreen} src={selectedDemo.videoUrl} />
                         </article>
                       ) : null}
 
@@ -1887,11 +1899,23 @@ export function SoraStudio() {
                         <article className="asset-stack">
                           <div className="asset-header">
                             <span>{t.studio.voiceoverGenerated}</span>
-                            <a href={selectedHook.voiceoverUrl} rel="noreferrer" target="_blank">
-                              {t.common.download}
+                            <a download href={selectedHook.voiceoverUrl} rel="noreferrer" target="_blank">
+                              {t.common.download} MP3
                             </a>
                           </div>
                           <audio className="audio-preview" controls preload="metadata" src={selectedHook.voiceoverUrl} />
+                        </article>
+                      ) : null}
+
+                      {selectedHook.hookAudioUrl ? (
+                        <article className="asset-stack">
+                          <div className="asset-header">
+                            <span>{t.studio.hookAudioSource}</span>
+                            <a download href={selectedHook.hookAudioUrl} rel="noreferrer" target="_blank">
+                              {t.common.download} MP3
+                            </a>
+                          </div>
+                          <audio className="audio-preview" controls preload="metadata" src={selectedHook.hookAudioUrl} />
                         </article>
                       ) : null}
                     </div>
