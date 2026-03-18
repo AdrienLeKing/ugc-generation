@@ -16,6 +16,7 @@ import type { GenerationRecord, SoraModel, VerticalSize } from "@/lib/sora/types
 
 type DashboardResponse = {
   envReady: boolean;
+  elevenLabsReady: boolean;
   pollIntervalMs: number;
   items: GenerationRecord[];
   backendError?: string;
@@ -71,9 +72,134 @@ function modelLabel(model: SoraModel) {
   return MODEL_OPTIONS.find((option) => option.value === model)?.label ?? model;
 }
 
+function FollowupAudioPanel({
+  item,
+  elevenLabsReady,
+  onComplete,
+}: {
+  item: GenerationRecord;
+  elevenLabsReady: boolean;
+  onComplete: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState(item.voiceoverScript ?? "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (item.status !== "completed" || !item.videoUrl) {
+    return null;
+  }
+
+  if (!elevenLabsReady) {
+    return (
+      <div className="followup-notice">
+        <small>Ajoutez ELEVENLABS_API_KEY dans .env.local pour generer l&apos;audio de suite.</small>
+      </div>
+    );
+  }
+
+  async function handleSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    if (!text.trim() || busy) return;
+
+    setBusy(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`/api/generations/${item.id}/followup-audio`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: text.trim() }),
+      });
+
+      const payload = (await response.json()) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(payload.error || "La generation audio a echoue.");
+      }
+
+      setOpen(false);
+      onComplete();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "La generation audio a echoue.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="followup-block">
+      {item.voiceoverUrl ? (
+        <div className="asset-block">
+          <div className="asset-header">
+            <span>Audio de suite</span>
+            <a href={item.voiceoverUrl} rel="noreferrer" target="_blank">
+              Telecharger
+            </a>
+          </div>
+          <audio className="audio-preview" controls preload="metadata" src={item.voiceoverUrl} />
+          {item.voiceoverScript ? (
+            <p className="followup-script">{item.voiceoverScript}</p>
+          ) : null}
+        </div>
+      ) : null}
+
+      {!open ? (
+        <button
+          className="secondary-button followup-trigger"
+          onClick={() => setOpen(true)}
+          type="button"
+        >
+          {item.voiceoverUrl ? "Regenerer l'audio de suite" : "Generer l'audio de suite"}
+        </button>
+      ) : (
+        <form className="followup-form" onSubmit={handleSubmit}>
+          <label className="field">
+            <span>Texte de continuation</span>
+            <textarea
+              disabled={busy}
+              onChange={(event) => setText(event.target.value)}
+              placeholder="Ecrivez le script que la voix clonee prononcera..."
+              required
+              rows={4}
+              value={text}
+            />
+          </label>
+
+          {error ? <p className="error-inline">{error}</p> : null}
+
+          <div className="followup-actions">
+            <button className="primary-button" disabled={busy || !text.trim()} type="submit">
+              {busy ? "Generation en cours..." : "Generer"}
+            </button>
+            <button
+              className="secondary-button"
+              disabled={busy}
+              onClick={() => { setOpen(false); setError(null); }}
+              type="button"
+            >
+              Annuler
+            </button>
+          </div>
+
+          {busy ? (
+            <div className="followup-progress">
+              <div className="progress-rail">
+                <div className="progress-bar followup-progress-bar" />
+              </div>
+              <small>Extraction audio, clonage de voix, synthese vocale...</small>
+            </div>
+          ) : null}
+        </form>
+      )}
+    </div>
+  );
+}
+
 export function SoraStudio() {
   const [items, setItems] = useState<GenerationRecord[]>([]);
   const [envReady, setEnvReady] = useState(false);
+  const [elevenLabsReady, setElevenLabsReady] = useState(false);
   const [pollIntervalMs, setPollIntervalMs] = useState(10_000);
   const [prompt, setPrompt] = useState("");
   const [model, setModel] = useState<SoraModel>(DEFAULT_MODEL);
@@ -93,6 +219,7 @@ export function SoraStudio() {
     startTransition(() => {
       setItems(payload.items);
       setEnvReady(payload.envReady);
+      setElevenLabsReady(payload.elevenLabsReady);
       setPollIntervalMs(payload.pollIntervalMs);
     });
 
@@ -454,6 +581,12 @@ export function SoraStudio() {
                       <video className="video-preview" controls playsInline preload="metadata" src={item.videoUrl} />
                     </div>
                   ) : null}
+
+                  <FollowupAudioPanel
+                    elevenLabsReady={elevenLabsReady}
+                    item={item}
+                    onComplete={() => void refreshDashboard(false)}
+                  />
 
                   {item.errorMessage ? <p className="error-inline">{item.errorMessage}</p> : null}
                 </article>

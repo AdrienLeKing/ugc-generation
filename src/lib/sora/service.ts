@@ -11,6 +11,7 @@ import {
   MAX_BATCH_SIZE,
   VERTICAL_SIZE_OPTIONS,
 } from "@/lib/sora/config";
+import { extractAudioFromMp4 } from "@/lib/sora/audio";
 import { readRecord, readRecords, upsertRecord, upsertRecords } from "@/lib/sora/db";
 import { deleteVoice, getVoice, createVoiceClone, convertTextToSpeech } from "@/lib/sora/elevenlabs";
 import { hasElevenLabsApiKey, hasOpenAiApiKey } from "@/lib/sora/env";
@@ -578,10 +579,144 @@ export async function listGenerations(options?: { refresh?: boolean }) {
     .toSorted((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
+export async function generateFollowupAudio(
+  generationId: string,
+  input: {
+    text: string;
+    modelId?: string;
+    outputFormat?: string;
+    voiceSettings?: Partial<ElevenLabsVoiceSettings>;
+  },
+) {
+  assertElevenLabsReady();
+
+  const text = input.text.trim();
+  if (!text) {
+    throw new Error("Le texte de continuation est obligatoire.");
+  }
+
+  let record = await readRecord(generationId);
+  ensureCompletedGeneration(record);
+
+  if (!record.videoUrl) {
+    throw new Error("La video de cette generation n'est pas encore disponible.");
+  }
+
+  // --- Step 1: Download the MP4 and extract audio ---
+  const videoResponse = await fetch(record.videoUrl);
+  if (!videoResponse.ok) {
+    throw new Error("Impossible de telecharger la video pour extraire l'audio.");
+  }
+  const mp4Buffer = await videoResponse.arrayBuffer();
+  const hookAudioBuffer = await extractAudioFromMp4(mp4Buffer);
+
+  if (hookAudioBuffer.length === 0) {
+    throw new Error("L'extraction audio n'a produit aucune donnee. La video ne contient peut-etre pas de piste audio.");
+  }
+
+  // --- Step 2: Clone voice from extracted audio ---
+  const cloneName = `ugc-followup-${generationId}`;
+  let clonedVoiceId: string | undefined;
+
+  try {
+    const voice = await createVoiceClone({
+      name: cloneName,
+      description: `Temporary voice clone for follow-up audio of generation ${generationId}`,
+      labels: { project: "ugc-generation", generation_id: generationId, type: "followup" },
+      removeBackgroundNoise: true,
+      audio: {
+        buffer: hookAudioBuffer,
+        fileName: `hook-${generationId}.mp3`,
+        mimeType: "audio/mpeg",
+      },
+    });
+
+    clonedVoiceId = voice.voiceId;
+
+    // Persist hook audio + voice metadata immediately
+    const hookAudioFileName = `hook-${generationId}.mp3`;
+    const hookAudioUrl = await uploadAudio(
+      `audio/hooks/${hookAudioFileName}`,
+      hookAudioBuffer,
+      "audio/mpeg",
+    );
+
+    record = {
+      ...record,
+      hookAudioUrl,
+      hookAudioFileName,
+      elevenlabsVoiceId: voice.voiceId,
+      elevenlabsVoiceName: voice.name ?? cloneName,
+      updatedAt: nowIsoString(),
+    };
+    await upsertRecord(record);
+
+    // --- Step 3: Generate TTS from transcript ---
+    const outputFormat = input.outputFormat?.trim() || DEFAULT_ELEVENLABS_OUTPUT_FORMAT;
+    const modelId = input.modelId?.trim() || DEFAULT_ELEVENLABS_MODEL;
+    const voiceSettings = mergeVoiceSettings(input.voiceSettings);
+
+    const audio = await convertTextToSpeech({
+      voiceId: voice.voiceId,
+      text,
+      modelId,
+      outputFormat,
+      voiceSettings,
+    });
+
+    // --- Step 4: Upload voiceover audio ---
+    const voiceoverFileName = buildVoiceoverFileName(generationId, outputFormat);
+    const voiceoverUrl = await uploadAudio(
+      `audio/voiceovers/${voiceoverFileName}`,
+      audio.buffer,
+      audio.contentType,
+    );
+
+    // --- Step 5: Persist voiceover metadata ---
+    record = {
+      ...record,
+      voiceoverUrl,
+      voiceoverFileName,
+      voiceoverScript: text,
+      updatedAt: nowIsoString(),
+    };
+    await upsertRecord(record);
+
+    // --- Step 6: Cleanup temporary cloned voice ---
+    try {
+      await deleteVoice(voice.voiceId);
+      record = {
+        ...record,
+        elevenlabsVoiceId: undefined,
+        elevenlabsVoiceName: undefined,
+        updatedAt: nowIsoString(),
+      };
+      await upsertRecord(record);
+      clonedVoiceId = undefined;
+    } catch {
+      // Non-critical — voice stays on ElevenLabs but flow is complete
+      console.warn(`Nettoyage de la voix clonee ${voice.voiceId} echoue. A supprimer manuellement.`);
+    }
+
+    return { record };
+  } catch (error) {
+    // Cleanup cloned voice on any failure
+    if (clonedVoiceId) {
+      try {
+        await deleteVoice(clonedVoiceId);
+      } catch {
+        // Best effort cleanup
+      }
+    }
+    throw error;
+  }
+}
+
 export async function getDashboardState() {
   try {
     return {
       envReady: hasOpenAiApiKey(),
+      elevenLabsReady: hasElevenLabsApiKey(),
       records: await listGenerations({ refresh: true }),
       backendError: undefined,
     };
@@ -593,6 +728,7 @@ export async function getDashboardState() {
 
     return {
       envReady: hasOpenAiApiKey(),
+      elevenLabsReady: hasElevenLabsApiKey(),
       records: [] as GenerationRecord[],
       backendError: message,
     };

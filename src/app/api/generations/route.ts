@@ -21,6 +21,7 @@ export async function GET() {
 
     return NextResponse.json({
       envReady: dashboard.envReady,
+      elevenLabsReady: dashboard.elevenLabsReady,
       pollIntervalMs: POLL_INTERVAL_MS,
       items: dashboard.records,
       backendError: dashboard.backendError,

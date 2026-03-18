@@ -427,6 +427,102 @@ textarea {
   background: rgba(7, 10, 14, 0.72);
 }
 
+.followup-block {
+  margin-top: 16px;
+}
+
+.followup-notice {
+  margin-top: 12px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-soft);
+}
+
+.followup-trigger {
+  width: 100%;
+  margin-top: 8px;
+  min-height: 42px;
+  font-size: 0.9rem;
+}
+
+.followup-form {
+  margin-top: 8px;
+  padding: 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--panel-border);
+}
+
+.followup-form .field {
+  margin-bottom: 12px;
+}
+
+.followup-form textarea {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  background: rgba(7, 10, 14, 0.72);
+  color: var(--text-main);
+  padding: 12px 14px;
+  resize: vertical;
+  min-height: 90px;
+}
+
+.followup-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.followup-actions .primary-button,
+.followup-actions .secondary-button {
+  min-height: 42px;
+  font-size: 0.9rem;
+}
+
+.followup-actions .primary-button {
+  flex: 1;
+}
+
+.followup-progress {
+  margin-top: 12px;
+  text-align: center;
+}
+
+.followup-progress small {
+  display: block;
+  margin-top: 8px;
+  color: var(--text-soft);
+  font-size: 0.82rem;
+}
+
+.followup-progress-bar {
+  animation: followup-pulse 2s ease-in-out infinite;
+  width: 60% !important;
+}
+
+@keyframes followup-pulse {
+  0%, 100% { width: 30% !important; opacity: 0.6; }
+  50% { width: 80% !important; opacity: 1; }
+}
+
+.followup-script {
+  margin: 10px 0 0;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-soft);
+  font-size: 0.9rem;
+  line-height: 1.5;
+  font-style: italic;
+}
+
+.audio-preview {
+  width: 100%;
+  border-radius: 14px;
+  margin-top: 4px;
+}
+
 @media (max-width: 1080px) {
   .hero-panel,
   .studio-grid {
