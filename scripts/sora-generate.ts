@@ -1,7 +1,5 @@
 import process from "node:process";
 
-import { createGenerationsFromCli } from "../src/lib/sora/service";
-
 function readArgument(flag: string) {
   const index = process.argv.indexOf(flag);
   if (index === -1) {
@@ -18,11 +16,11 @@ function hasFlag(flag: string) {
 function printHelp() {
   console.log(`
 Commande:
-  npm run sora -- --prompt "Votre prompt" [--seconds 8] [--size 720x1280] [--count 3] [--model sora-2] [--image /chemin/image.jpg]
+  npm run sora -- --spoken "Texte prononce" --scene "Scene et settings" --image /chemin/image.jpg [--seconds 8] [--model sora-2]
 
 Exemples:
-  npm run sora -- --prompt "UGC skincare, lumiere douce, plan smartphone naturel"
-  npm run sora -- --prompt "Plan detaille d'un coffee setup premium" --seconds 12 --count 3 --image "/Users/adrien/image.jpg"
+  npm run sora -- --spoken "Stop, si ta peau tiraille apres la douche..." --scene "Face camera, salle de bain lumineuse, ton naturel" --image "/Users/adrien/image.jpg"
+  npm run sora -- --spoken "J'ai teste ca pendant 7 jours." --scene "Cuisine claire, leger mouvement smartphone, energie UGC premium" --image "/Users/adrien/image.jpg" --seconds 12 --model sora-2-pro
 `);
 }
 
@@ -32,20 +30,22 @@ async function main() {
     return;
   }
 
-  const prompt = readArgument("--prompt");
+  const spokenText = readArgument("--spoken");
+  const sceneDescription = readArgument("--scene");
 
-  if (!prompt) {
+  if (!spokenText || !sceneDescription) {
     printHelp();
     process.exitCode = 1;
     return;
   }
 
+  const { createGenerationsFromCli } = await import("../src/lib/sora/service");
+
   const result = await createGenerationsFromCli({
-    prompt,
+    spokenText,
+    sceneDescription,
     model: readArgument("--model"),
     seconds: Number(readArgument("--seconds") || 8),
-    size: readArgument("--size"),
-    count: Number(readArgument("--count") || 1),
     imagePath: readArgument("--image"),
   });
 

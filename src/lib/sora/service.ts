@@ -8,7 +8,6 @@ import {
   DEFAULT_MODEL,
   DEFAULT_SIZE,
   DURATION_OPTIONS,
-  MAX_BATCH_SIZE,
   VERTICAL_SIZE_OPTIONS,
 } from "@/lib/sora/config";
 import { extractAudioFromMp4 } from "@/lib/sora/audio";
@@ -27,7 +26,7 @@ import type {
   SoraModel,
   VerticalSize,
 } from "@/lib/sora/types";
-import { clamp, nowIsoString, sanitizeFileName, toIsoTimestamp } from "@/lib/sora/utils";
+import { nowIsoString, sanitizeFileName, toIsoTimestamp } from "@/lib/sora/utils";
 
 function isSupportedSeconds(seconds: number) {
   return DURATION_OPTIONS.some((option) => option.value === seconds);
@@ -188,15 +187,30 @@ function buildVoiceoverFileName(generationId: string, outputFormat: string) {
   return `voiceover-${generationId}.${extension}`;
 }
 
+function buildHookPrompt(spokenText: string, sceneDescription: string) {
+  return [
+    "Create a short vertical 9:16 UGC hook video using the provided reference image as the exact identity of the speaking creator.",
+    "Keep the face consistent with the reference image and frame the creator speaking directly to camera.",
+    `The creator must say exactly this line with clear lip sync and natural speaking rhythm: "${spokenText}"`,
+    `Scene, settings, and creative direction: ${sceneDescription}`,
+    "Keep the pacing hook-first, realistic, smartphone-native, and focused on the creator delivering the line.",
+  ].join("\n");
+}
+
 export async function createGenerations(input: CreateGenerationInput) {
-  const prompt = input.prompt.trim();
+  const spokenText = input.spokenText.trim();
+  const sceneDescription = input.sceneDescription.trim();
   const model = input.model || DEFAULT_MODEL;
   const seconds = input.seconds || DEFAULT_DURATION_SECONDS;
-  const size = input.size || DEFAULT_SIZE;
-  const count = clamp(Math.trunc(input.count || 1), 1, MAX_BATCH_SIZE);
+  const size = DEFAULT_SIZE;
+  const referenceImage = input.referenceImage;
 
-  if (!prompt) {
-    throw new Error("Le prompt est obligatoire.");
+  if (!spokenText) {
+    throw new Error("Le texte prononce est obligatoire.");
+  }
+
+  if (!sceneDescription) {
+    throw new Error("La description de la scene est obligatoire.");
   }
 
   if (!isSupportedModel(model)) {
@@ -211,26 +225,28 @@ export async function createGenerations(input: CreateGenerationInput) {
     throw new Error("Format vertical non pris en charge.");
   }
 
-  // Upload reference image to Supabase Storage if provided
-  let imageUrl: string | undefined;
-  const referenceImage = input.referenceImage;
-  if (referenceImage) {
-    imageUrl = await uploadImage(referenceImage.buffer, referenceImage.fileName);
+  if (!referenceImage) {
+    throw new Error("La photo de la creatrice est obligatoire.");
   }
 
+  const prompt = buildHookPrompt(spokenText, sceneDescription);
+  const imageUrl = await uploadImage(referenceImage.buffer, referenceImage.fileName);
   const baseRecord = {
     prompt,
+    spokenText,
+    sceneDescription,
     model,
     seconds,
     size,
-    inputMode: referenceImage ? ("text_plus_image" as const) : ("text" as const),
+    inputMode: "text_plus_image" as const,
     inputImageUrl: imageUrl,
-    inputImageOriginalName: referenceImage?.originalName,
-    inputImageWidth: referenceImage?.width,
-    inputImageHeight: referenceImage?.height,
+    inputImageOriginalName: referenceImage.originalName,
+    inputImageWidth: referenceImage.width,
+    inputImageHeight: referenceImage.height,
     videoUrl: undefined,
     videoFileName: undefined,
     createdAt: nowIsoString(),
+    updatedAt: nowIsoString(),
     remoteCreatedAt: undefined,
     remoteCompletedAt: undefined,
     remoteExpiresAt: undefined,
@@ -238,90 +254,67 @@ export async function createGenerations(input: CreateGenerationInput) {
     editPrompt: undefined,
   };
 
-  const createdJobResults = await Promise.allSettled(
-    Array.from({ length: count }, async () => {
-      const remoteJob = await createRemoteVideoJob({
-        prompt,
-        model,
-        seconds,
-        size,
-        referenceImage,
-      });
+  const remoteJob = await createRemoteVideoJob({
+    prompt,
+    model,
+    seconds,
+    size,
+    referenceImage,
+  });
 
-      return mapRemoteJobToRecord(remoteJob, {
-        id: remoteJob.id,
-        ...baseRecord,
-      });
+  const createdJobs = [
+    mapRemoteJobToRecord(remoteJob, {
+      id: remoteJob.id,
+      ...baseRecord,
     }),
-  );
-
-  const createdJobs = createdJobResults
-    .filter((result): result is PromiseFulfilledResult<GenerationRecord> => result.status === "fulfilled")
-    .map((result) => result.value);
-
-  if (createdJobs.length > 0) {
-    await upsertRecords(createdJobs);
-  }
-
-  const failedJobs = createdJobResults.filter((result): result is PromiseRejectedResult => result.status === "rejected");
-
-  if (failedJobs.length > 0) {
-    console.warn(
-      `Certaines generations Sora ont echoue a la creation (${failedJobs.length}/${count}).`,
-      failedJobs.map((result) => (result.reason instanceof Error ? result.reason.message : String(result.reason))),
-    );
-  }
-
-  if (createdJobs.length === 0) {
-    const firstFailure = failedJobs[0]?.reason;
-    throw firstFailure instanceof Error ? firstFailure : new Error("La creation des generations a echoue.");
-  }
-
+  ];
+  await upsertRecords(createdJobs);
   return createdJobs.toSorted((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 export async function createGenerationsFromFormData(formData: FormData) {
-  const prompt = String(formData.get("prompt") || "");
+  const spokenText = String(formData.get("spokenText") || "");
+  const sceneDescription = String(formData.get("sceneDescription") || "");
   const model = String(formData.get("model") || DEFAULT_MODEL);
   const seconds = Number(formData.get("seconds") || DEFAULT_DURATION_SECONDS);
-  const size = String(formData.get("size") || DEFAULT_SIZE);
-  const count = Number(formData.get("count") || 1);
   const maybeFile = formData.get("referenceImage");
-  const referenceImage =
-    maybeFile instanceof File && maybeFile.size > 0 && isSupportedSize(size)
-      ? await prepareReferenceImage(maybeFile, size)
-      : undefined;
+
+  if (!(maybeFile instanceof File) || maybeFile.size === 0) {
+    throw new Error("La photo de la creatrice est obligatoire.");
+  }
+
+  const referenceImage = await prepareReferenceImage(maybeFile, DEFAULT_SIZE);
 
   return createGenerations({
-    prompt,
+    spokenText,
+    sceneDescription,
     model: isSupportedModel(model) ? model : DEFAULT_MODEL,
     seconds,
-    size: isSupportedSize(size) ? size : DEFAULT_SIZE,
-    count,
     referenceImage,
   });
 }
 
 export async function createGenerationsFromCli(input: {
-  prompt: string;
+  spokenText: string;
+  sceneDescription: string;
   model?: string;
   seconds?: number;
-  size?: string;
-  count?: number;
   imagePath?: string;
 }) {
-  const requestedSize = input.size;
   const requestedModel = input.model;
-  const size: VerticalSize = requestedSize && isSupportedSize(requestedSize) ? requestedSize : DEFAULT_SIZE;
   const model: SoraModel = requestedModel && isSupportedModel(requestedModel) ? requestedModel : DEFAULT_MODEL;
-  const referenceImage = input.imagePath ? await prepareReferenceImageFromPath(input.imagePath, size) : undefined;
+
+  if (!input.imagePath) {
+    throw new Error("Ajoutez --image avec la photo de la creatrice.");
+  }
+
+  const referenceImage = await prepareReferenceImageFromPath(input.imagePath, DEFAULT_SIZE);
 
   return createGenerations({
-    prompt: input.prompt,
+    spokenText: input.spokenText,
+    sceneDescription: input.sceneDescription,
     model,
     seconds: input.seconds ?? DEFAULT_DURATION_SECONDS,
-    size,
-    count: input.count ?? 1,
     referenceImage,
   });
 }
@@ -338,6 +331,8 @@ export async function editGeneration(sourceId: string, editPrompt: string) {
   const newRecord = mapRemoteJobToRecord(remoteJob, {
     id: remoteJob.id,
     prompt: source.prompt,
+    spokenText: source.spokenText,
+    sceneDescription: source.sceneDescription,
     model: source.model,
     seconds: source.seconds,
     size: source.size,
@@ -352,6 +347,13 @@ export async function editGeneration(sourceId: string, editPrompt: string) {
     remoteCreatedAt: undefined,
     remoteCompletedAt: undefined,
     remoteExpiresAt: undefined,
+    hookAudioUrl: undefined,
+    hookAudioFileName: undefined,
+    elevenlabsVoiceId: undefined,
+    elevenlabsVoiceName: undefined,
+    voiceoverUrl: undefined,
+    voiceoverFileName: undefined,
+    voiceoverScript: undefined,
     sourceVideoId: source.id,
     editPrompt,
   });

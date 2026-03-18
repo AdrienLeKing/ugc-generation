@@ -6,9 +6,7 @@ import { startTransition, useEffect, useEffectEvent, useRef, useState } from "re
 import {
   DEFAULT_DURATION_SECONDS,
   DEFAULT_MODEL,
-  DEFAULT_SIZE,
   DURATION_OPTIONS,
-  MAX_BATCH_SIZE,
   MODEL_OPTIONS,
   VERTICAL_SIZE_OPTIONS,
 } from "@/lib/sora/config";
@@ -201,11 +199,10 @@ export function SoraStudio() {
   const [envReady, setEnvReady] = useState(false);
   const [elevenLabsReady, setElevenLabsReady] = useState(false);
   const [pollIntervalMs, setPollIntervalMs] = useState(10_000);
-  const [prompt, setPrompt] = useState("");
+  const [spokenText, setSpokenText] = useState("");
+  const [sceneDescription, setSceneDescription] = useState("");
   const [model, setModel] = useState<SoraModel>(DEFAULT_MODEL);
   const [seconds, setSeconds] = useState<number>(DEFAULT_DURATION_SECONDS);
-  const [size, setSize] = useState<VerticalSize>(DEFAULT_SIZE);
-  const [count, setCount] = useState(1);
   const [referenceImage, setReferenceImage] = useState<File | null>(null);
   const [referencePreviewUrl, setReferencePreviewUrl] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -291,11 +288,10 @@ export function SoraStudio() {
 
     try {
       const formData = new FormData();
-      formData.set("prompt", prompt);
+      formData.set("spokenText", spokenText);
+      formData.set("sceneDescription", sceneDescription);
       formData.set("model", model);
       formData.set("seconds", String(seconds));
-      formData.set("size", size);
-      formData.set("count", String(count));
 
       if (referenceImage) {
         formData.set("referenceImage", referenceImage);
@@ -342,11 +338,11 @@ export function SoraStudio() {
 
       <section className="hero-panel">
         <div className="hero-copy">
-          <span className="eyebrow">Sora 2 local studio</span>
-          <h1>Generations video verticales, texte seul ou texte plus image, avec suivi local.</h1>
+          <span className="eyebrow">Hook generator</span>
+          <h1>Photo de la creatrice, texte prononce, scene, puis generation du hook vertical.</h1>
           <p>
-            Tout est pense pour du 9:16. Vous choisissez la duree, le niveau de detail vertical, le prompt,
-            l&apos;image de reference si besoin, puis vous suivez chaque rendu sans quitter la page.
+            L&apos;outil est maintenant concentre sur un seul usage: generer un hook face camera a partir de la photo
+            de la creatrice, de ce qu&apos;elle dit exactement, et de la direction de scene.
           </p>
         </div>
 
@@ -363,6 +359,10 @@ export function SoraStudio() {
             <span>Rafraichissement</span>
             <strong>{Math.round(pollIntervalMs / 1000)} s</strong>
           </div>
+          <div className="stat-card">
+            <span>Format</span>
+            <strong>9:16</strong>
+          </div>
         </div>
       </section>
 
@@ -370,8 +370,8 @@ export function SoraStudio() {
         <form className="panel form-panel" onSubmit={handleSubmit}>
           <div className="panel-header">
             <div>
-              <h2>Lancer une generation</h2>
-              <p>Le format reste toujours vertical, version TikTok.</p>
+              <h2>Generer un hook</h2>
+              <p>Vertical TikTok fixe, une seule generation a la fois.</p>
             </div>
             <span className={`badge ${envReady ? "badge-success" : "badge-danger"}`}>
               {envReady ? "Cle API detectee" : "Cle API manquante"}
@@ -379,12 +379,23 @@ export function SoraStudio() {
           </div>
 
           <label className="field">
-            <span>Prompt principal</span>
+            <span>Texte prononce par la creatrice</span>
             <textarea
-              value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
-              rows={7}
-              placeholder="Exemple: Une influenceuse dans une cuisine lumineuse, plan serre smartphone, ambiance naturelle, camera epaule tres legere, style UGC premium."
+              value={spokenText}
+              onChange={(event) => setSpokenText(event.target.value)}
+              rows={5}
+              placeholder='Exemple: "Stop, si ta peau tiraille apres chaque douche, il faut vraiment voir ca."'
+              required
+            />
+          </label>
+
+          <label className="field">
+            <span>Scene et settings</span>
+            <textarea
+              value={sceneDescription}
+              onChange={(event) => setSceneDescription(event.target.value)}
+              rows={4}
+              placeholder="Exemple: Face camera dans une salle de bain lumineuse, cadrage poitrine, energie naturelle, debit rapide, ton UGC premium, leger mouvement smartphone."
               required
             />
           </label>
@@ -414,37 +425,11 @@ export function SoraStudio() {
             </label>
           </div>
 
-          <div className="field-grid">
-            <label className="field">
-              <span>Format vertical</span>
-              <select value={size} onChange={(event) => setSize(event.target.value as VerticalSize)}>
-                {VERTICAL_SIZE_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-              <small>{VERTICAL_SIZE_OPTIONS.find((option) => option.value === size)?.description}</small>
-            </label>
-
-            <label className="field">
-              <span>Nombre de generations</span>
-              <select value={count} onChange={(event) => setCount(Number(event.target.value))}>
-                {Array.from({ length: MAX_BATCH_SIZE }, (_, index) => index + 1).map((value) => (
-                  <option key={value} value={value}>
-                    {value}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-
           <label className="field">
-            <span>Image de reference optionnelle</span>
-            <input accept="image/*" type="file" onChange={handleImageChange} />
+            <span>Photo de la creatrice</span>
+            <input accept="image/*" required type="file" onChange={handleImageChange} />
             <small>
-              Si vous ajoutez une image, elle sera recadree automatiquement en vertical pour correspondre au format
-              video choisi.
+              Cette image sert de reference visage. Elle sera recadree automatiquement en vertical TikTok.
             </small>
           </label>
 
@@ -472,7 +457,7 @@ export function SoraStudio() {
 
           <div className="form-actions">
             <button className="primary-button" disabled={submitting || !envReady} type="submit">
-              {submitting ? "Generation en cours d'envoi..." : "Lancer la generation"}
+              {submitting ? "Generation du hook en cours..." : "Generer le hook"}
             </button>
 
             <button
@@ -490,7 +475,7 @@ export function SoraStudio() {
           <div className="panel-header">
             <div>
               <h2>Suivi des generations</h2>
-              <p>Chaque carte garde le prompt, l&apos;entree et le resultat final une fois telecharge localement.</p>
+              <p>Chaque carte garde la phrase prononcee, la scene, la photo d&apos;entree et le resultat final.</p>
             </div>
             <span className="badge badge-neutral">
               {activeCount > 0 ? `${activeCount} actives` : "Aucune active"}
@@ -498,17 +483,18 @@ export function SoraStudio() {
           </div>
 
           <div className="tips-strip">
-            <span>9:16 uniquement</span>
-            <span>Texte seul ou texte + image</span>
+            <span>Photo obligatoire</span>
+            <span>Texte exact</span>
+            <span>Scene separee</span>
             <span>Suivi automatique</span>
-            <span>Sortie MP4 locale</span>
+            <span>Vertical TikTok</span>
           </div>
 
           <div className="jobs-list">
             {items.length === 0 ? (
               <div className="empty-state">
                 <h3>Pas encore de generation</h3>
-                <p>Lancez votre premier prompt pour commencer a construire votre historique local.</p>
+                <p>Ajoutez la photo, la phrase et la scene pour lancer votre premier hook.</p>
               </div>
             ) : (
               items.map((item) => (
@@ -523,12 +509,20 @@ export function SoraStudio() {
                     <span className={`badge badge-${statusTone(item.status)}`}>{Math.round(item.progressPercent)}%</span>
                   </div>
 
-                  <p className="job-prompt">{item.prompt}</p>
+                  <div className="script-block">
+                    <span className="script-label">Ce que la creatrice dit</span>
+                    <p className="job-prompt">{item.spokenText ?? item.prompt}</p>
+                  </div>
+
+                  <div className="script-block">
+                    <span className="script-label">Scene et settings</span>
+                    <p className="job-scene">{item.sceneDescription ?? "Generation plus ancienne sans scene separee."}</p>
+                  </div>
 
                   <div className="job-grid">
                     <div className="job-info">
-                      <span>Mode d&apos;entree</span>
-                      <strong>{item.inputMode === "text_plus_image" ? "Texte + image" : "Texte seul"}</strong>
+                      <span>Format</span>
+                      <strong>{sizeLabel(item.size)}</strong>
                     </div>
 
                     <div className="job-info">

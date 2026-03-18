@@ -14,12 +14,12 @@ export const MODEL_OPTIONS: Array<{
   {
     value: "sora-2",
     label: "Sora 2",
-    description: "Le choix simple et rapide pour lancer plusieurs variantes.",
+    description: "Le choix simple pour generer rapidement un hook face camera.",
   },
   {
     value: "sora-2-pro",
     label: "Sora 2 Pro",
-    description: "Plus ambitieux visuellement, au prix d'un temps de rendu plus long.",
+    description: "Plus ambitieux visuellement, utile si vous poussez le rendu du hook.",
   },
 ];
 
@@ -45,8 +45,6 @@ export const VERTICAL_SIZE_OPTIONS: Array<{
     description: "9:16 plus fin, utile pour une version plus poussée.",
   },
 ];
-
-export const MAX_BATCH_SIZE = 4;
 
 export const DEFAULT_ELEVENLABS_MODEL = "eleven_multilingual_v2";
 export const DEFAULT_ELEVENLABS_OUTPUT_FORMAT = "mp3_44100_128";

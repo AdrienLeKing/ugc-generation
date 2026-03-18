@@ -11,6 +11,8 @@ export function toRecord(row: GenerationRow): GenerationRecord {
   return {
     id: row.id,
     prompt: row.prompt,
+    spokenText: row.spoken_text ?? undefined,
+    sceneDescription: row.scene_description ?? undefined,
     model: row.model as GenerationRecord["model"],
     seconds: row.seconds,
     size: row.size as GenerationRecord["size"],
@@ -45,6 +47,8 @@ export function toDbRow(record: GenerationRecord): Omit<GenerationRow, "updated_
   return {
     id: record.id,
     prompt: record.prompt,
+    spoken_text: record.spokenText ?? null,
+    scene_description: record.sceneDescription ?? null,
     model: record.model,
     seconds: record.seconds,
     size: record.size,

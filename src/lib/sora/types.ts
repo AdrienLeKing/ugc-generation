@@ -22,6 +22,8 @@ export type ElevenLabsVoiceSettings = {
 export type GenerationRecord = {
   id: string;
   prompt: string;
+  spokenText?: string;
+  sceneDescription?: string;
   model: SoraModel;
   seconds: number;
   size: VerticalSize;
@@ -54,6 +56,8 @@ export type GenerationRecord = {
 export type GenerationRow = {
   id: string;
   prompt: string;
+  spoken_text: string | null;
+  scene_description: string | null;
   model: string;
   seconds: number;
   size: string;
@@ -93,12 +97,11 @@ export type PreparedImage = {
 };
 
 export type CreateGenerationInput = {
-  prompt: string;
+  spokenText: string;
+  sceneDescription: string;
   model: SoraModel;
   seconds: number;
-  size: VerticalSize;
-  count: number;
-  referenceImage?: PreparedImage;
+  referenceImage: PreparedImage;
 };
 
 export type RemoteVideoJob = {

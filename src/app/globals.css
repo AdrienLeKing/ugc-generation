@@ -184,7 +184,7 @@ textarea {
 
 .field textarea {
   resize: vertical;
-  min-height: 170px;
+  min-height: 120px;
 }
 
 .reference-preview,
@@ -361,9 +361,30 @@ textarea {
 }
 
 .job-prompt {
-  margin: 18px 0;
+  margin: 8px 0 0;
   font-size: 1rem;
   line-height: 1.6;
+}
+
+.job-scene {
+  margin: 8px 0 0;
+  color: var(--text-soft);
+  line-height: 1.6;
+}
+
+.script-block {
+  margin-top: 16px;
+  border-radius: 18px;
+  padding: 14px 16px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.script-label {
+  color: var(--text-soft);
+  font-family: var(--font-mono), monospace;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .job-grid {

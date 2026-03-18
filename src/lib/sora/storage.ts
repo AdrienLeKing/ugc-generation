@@ -1,8 +1,9 @@
-import { supabase } from "@/lib/supabase";
+import { getSupabase } from "@/lib/supabase";
 
 const BUCKET = "ugc-videos";
 
 export async function uploadImage(buffer: Buffer, fileName: string): Promise<string> {
+  const supabase = getSupabase();
   const path = `uploads/${fileName}`;
   const { error } = await supabase.storage
     .from(BUCKET)
@@ -19,6 +20,7 @@ export async function uploadImage(buffer: Buffer, fileName: string): Promise<str
 }
 
 export async function uploadVideo(videoId: string, buffer: ArrayBuffer): Promise<string> {
+  const supabase = getSupabase();
   const path = `generated/${videoId}.mp4`;
   const { error } = await supabase.storage
     .from(BUCKET)
@@ -35,6 +37,7 @@ export async function uploadVideo(videoId: string, buffer: ArrayBuffer): Promise
 }
 
 export async function uploadAudio(path: string, buffer: Buffer, contentType: string): Promise<string> {
+  const supabase = getSupabase();
   const { error } = await supabase.storage
     .from(BUCKET)
     .upload(path, buffer, {
@@ -50,6 +53,7 @@ export async function uploadAudio(path: string, buffer: Buffer, contentType: str
 }
 
 export function getPublicUrl(path: string): string {
+  const supabase = getSupabase();
   const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
   return data.publicUrl;
 }

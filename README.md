@@ -4,13 +4,14 @@ Mini studio local en Next.js pour lancer et suivre des generations Sora 2 en ver
 
 ## Ce que fait le projet
 
-- prompt texte seul
-- prompt texte + image de reference
+- photo de la creatrice obligatoire
+- champ pour le texte exact qu'elle dit
+- champ pour la scene et les settings
 - choix de duree: 4, 8 ou 12 secondes
-- choix du format vertical: 720x1280 ou 1024x1792
-- lancement de plusieurs generations en une fois
+- choix du modele: Sora 2 ou Sora 2 Pro
+- format vertical TikTok impose automatiquement
 - suivi local des statuts et telechargement automatique du MP4 une fois termine
-- commande terminal pour lancer un batch sans passer par l'interface
+- commande terminal pour lancer le meme flux sans passer par l'interface
 
 ## Demarrage
 
@@ -39,13 +40,7 @@ Puis ouvrir l'adresse affichee par Next.js. En general ce sera [http://localhost
 ## Commande terminal
 
 ```bash
-npm run sora -- --prompt "Une creatrice UGC en salle de bain lumineuse" --seconds 8 --size 720x1280 --count 2
-```
-
-Avec image de reference:
-
-```bash
-npm run sora -- --prompt "Packshot skincare premium, camera lente, lumiere chaude" --image "/chemin/vers/image.jpg"
+npm run sora -- --spoken "Stop, si ta peau tiraille apres la douche..." --scene "Face camera, salle de bain lumineuse, ton naturel, rythme hook" --image "/chemin/vers/image.jpg" --seconds 8
 ```
 
 ## Stockage local
