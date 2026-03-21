@@ -224,6 +224,7 @@ export async function createGenerations(input: CreateGenerationInput & { userId?
   let referenceImage = input.referenceImage;
   const userId = input.userId;
   const personaId = input.personaId;
+  const useReferenceScene = Boolean(input.useReferenceScene);
 
   if (!referenceImage && personaId) {
     const persona = await readPersona(personaId);
@@ -257,8 +258,10 @@ export async function createGenerations(input: CreateGenerationInput & { userId?
   const prompt = buildHookPrompt({
     spokenText,
     sceneDescription,
-    presetId: input.hookPresetId,
+    shotPresetId: input.shotPresetId,
+    scenePresetId: input.scenePresetId,
     hasReferenceImage: Boolean(referenceImage),
+    useReferenceScene,
   });
   const imageUrl = referenceImage ? await uploadImage(referenceImage.buffer, referenceImage.fileName) : undefined;
   const baseRecord = {
@@ -315,7 +318,9 @@ export async function createGenerations(input: CreateGenerationInput & { userId?
 export async function createGenerationsFromFormData(formData: FormData, userId?: string) {
   const spokenText = String(formData.get("spokenText") || "");
   const sceneDescription = String(formData.get("sceneDescription") || "");
-  const hookPresetId = String(formData.get("hookPresetId") || "");
+  const shotPresetId = String(formData.get("shotPresetId") || "");
+  const scenePresetId = String(formData.get("scenePresetId") || "");
+  const useReferenceScene = String(formData.get("useReferenceScene") || "") === "true";
   const model = String(formData.get("model") || DEFAULT_MODEL);
   const seconds = Number(formData.get("seconds") || DEFAULT_DURATION_SECONDS);
   const maybeFile = formData.get("referenceImage");
@@ -329,7 +334,9 @@ export async function createGenerationsFromFormData(formData: FormData, userId?:
   return createGenerations({
     spokenText,
     sceneDescription,
-    hookPresetId,
+    shotPresetId,
+    scenePresetId,
+    useReferenceScene,
     model: isSupportedModel(model) ? model : DEFAULT_MODEL,
     seconds,
     referenceImage,

@@ -625,6 +625,38 @@ button {
   gap: 14px;
 }
 
+.checkbox-card {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.checkbox-card input[type="checkbox"] {
+  margin-top: 3px;
+}
+
+.checkbox-card strong,
+.checkbox-card small {
+  display: block;
+}
+
+.checkbox-card strong {
+  font-size: 0.95rem;
+}
+
+.checkbox-card small {
+  margin-top: 4px;
+  color: var(--text-soft);
+}
+
+.checkbox-card.is-disabled {
+  opacity: 0.72;
+}
+
 .wizard-form {
   display: grid;
   gap: 18px;

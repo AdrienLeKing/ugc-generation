@@ -10,11 +10,16 @@ import {
   MODEL_OPTIONS,
 } from "@/lib/sora/config";
 import {
-  DEFAULT_HOOK_PRESET_ID,
-  HOOK_PRESETS,
-  getHookPreset,
-  isCustomHookPreset,
-  type HookPresetId,
+  DEFAULT_HOOK_SCENE_PRESET_ID,
+  DEFAULT_HOOK_SHOT_PRESET_ID,
+  HOOK_SCENE_PRESETS,
+  HOOK_SHOT_PRESETS,
+  getDefaultSceneDescription,
+  getHookScenePreset,
+  getHookShotPreset,
+  isCustomHookScenePreset,
+  type HookScenePresetId,
+  type HookShotPresetId,
 } from "@/lib/sora/hook-presets";
 import { getBrowserSupabase } from "@/lib/supabase/browser";
 import type { DemoAsset, GenerationRecord, Persona, SoraModel } from "@/lib/sora/types";
@@ -374,13 +379,20 @@ function InlineVideoPreview({
 export function SoraStudio() {
   const { locale, t } = useI18n();
 
-  const presetI18n: Record<string, { name: string; badge: string; summary: string; context: string }> = {
-    selfie_handheld: { name: t.hookPresets.selfie, badge: t.hookPresets.selfieBadge, summary: t.hookPresets.selfieSummary, context: t.hookPresets.selfieContext },
-    car_dashboard: { name: t.hookPresets.carDashboard, badge: t.hookPresets.carDashboardBadge, summary: t.hookPresets.carDashboardSummary, context: t.hookPresets.carDashboardContext },
-    car_passenger: { name: t.hookPresets.carPassenger, badge: t.hookPresets.carPassengerBadge, summary: t.hookPresets.carPassengerSummary, context: t.hookPresets.carPassengerContext },
-    kitchen_counter: { name: t.hookPresets.kitchen, badge: t.hookPresets.kitchenBadge, summary: t.hookPresets.kitchenSummary, context: t.hookPresets.kitchenContext },
-    bathroom_counter: { name: t.hookPresets.bathroom, badge: t.hookPresets.bathroomBadge, summary: t.hookPresets.bathroomSummary, context: t.hookPresets.bathroomContext },
-    custom: { name: t.hookPresets.custom, badge: t.hookPresets.customBadge, summary: t.hookPresets.customSummary, context: t.hookPresets.customContext },
+  const shotPresetI18n: Record<string, { name: string; badge: string; summary: string; context: string }> = {
+    selfie_handheld: { name: t.shotPresets.selfie, badge: t.shotPresets.selfieBadge, summary: t.shotPresets.selfieSummary, context: t.shotPresets.selfieContext },
+    phone_front_fixed: { name: t.shotPresets.frontFixed, badge: t.shotPresets.frontFixedBadge, summary: t.shotPresets.frontFixedSummary, context: t.shotPresets.frontFixedContext },
+    phone_off_axis: { name: t.shotPresets.offAxis, badge: t.shotPresets.offAxisBadge, summary: t.shotPresets.offAxisSummary, context: t.shotPresets.offAxisContext },
+    custom: { name: t.shotPresets.custom, badge: t.shotPresets.customBadge, summary: t.shotPresets.customSummary, context: t.shotPresets.customContext },
+  };
+
+  const scenePresetI18n: Record<string, { name: string; badge: string; summary: string; context: string }> = {
+    indoor_home: { name: t.scenePresets.indoorHome, badge: t.scenePresets.indoorHomeBadge, summary: t.scenePresets.indoorHomeSummary, context: t.scenePresets.indoorHomeContext },
+    kitchen: { name: t.scenePresets.kitchen, badge: t.scenePresets.kitchenBadge, summary: t.scenePresets.kitchenSummary, context: t.scenePresets.kitchenContext },
+    bathroom: { name: t.scenePresets.bathroom, badge: t.scenePresets.bathroomBadge, summary: t.scenePresets.bathroomSummary, context: t.scenePresets.bathroomContext },
+    car: { name: t.scenePresets.car, badge: t.scenePresets.carBadge, summary: t.scenePresets.carSummary, context: t.scenePresets.carContext },
+    outdoor: { name: t.scenePresets.outdoor, badge: t.scenePresets.outdoorBadge, summary: t.scenePresets.outdoorSummary, context: t.scenePresets.outdoorContext },
+    custom: { name: t.scenePresets.custom, badge: t.scenePresets.customBadge, summary: t.scenePresets.customSummary, context: t.scenePresets.customContext },
   };
 
   const stepTitles: Array<{ step: WizardStep; title: string; caption: string }> = [
@@ -420,13 +432,15 @@ export function SoraStudio() {
   const [selectedStep, setSelectedStep] = useState<WizardStep>(1);
   const [subStep, setSubStep] = useState(0);
   const [selectedHookId, setSelectedHookId] = useState<string | null>(null);
-  const [hookPresetId, setHookPresetId] = useState<HookPresetId>(DEFAULT_HOOK_PRESET_ID);
+  const [shotPresetId, setShotPresetId] = useState<HookShotPresetId>(DEFAULT_HOOK_SHOT_PRESET_ID);
+  const [scenePresetId, setScenePresetId] = useState<HookScenePresetId>(DEFAULT_HOOK_SCENE_PRESET_ID);
   const [spokenText, setSpokenText] = useState("");
-  const [sceneDescription, setSceneDescription] = useState(getHookPreset(DEFAULT_HOOK_PRESET_ID).sceneStarter);
+  const [sceneDescription, setSceneDescription] = useState(getDefaultSceneDescription(DEFAULT_HOOK_SCENE_PRESET_ID));
   const [model, setModel] = useState<SoraModel>(DEFAULT_MODEL);
   const [seconds, setSeconds] = useState<number>(DEFAULT_DURATION_SECONDS);
   const [referenceImage, setReferenceImage] = useState<File | null>(null);
   const [referencePreviewUrl, setReferencePreviewUrl] = useState<string | null>(null);
+  const [useReferenceScene, setUseReferenceScene] = useState(false);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
   const [demosError, setDemosError] = useState<string | null>(null);
   const [createDemoError, setCreateDemoError] = useState<string | null>(null);
@@ -490,17 +504,19 @@ export function SoraStudio() {
     setSubStep(sub);
   }
 
-  const step1Subs = [t.studio.subPreset, t.studio.subTextScene, t.studio.subCreatorPhoto, t.studio.subGenerate];
+  const step1Subs = [t.studio.subPreset, t.studio.subText, t.studio.subCreatorPhoto, t.studio.subGenerate];
   const step2Subs = [t.studio.subChooseDemo, t.studio.subWriteText];
 
   const selectedHook = items.find((item) => item.id === selectedHookId) ?? null;
-  const selectedPreset = getHookPreset(hookPresetId);
-  const isCustomPreset = isCustomHookPreset(hookPresetId);
+  const selectedShotPreset = getHookShotPreset(shotPresetId);
+  const selectedScenePreset = getHookScenePreset(scenePresetId);
+  const isCustomScenePreset = isCustomHookScenePreset(scenePresetId);
   const hasSelectedHook = Boolean(selectedHook);
   const persistedSelectedDemoId = selectedHook?.selectedDemoId ?? "";
   const persistedDemoScript = selectedHook?.demoScriptDraft ?? "";
   const selectedDemo = demos.find((demo) => demo.id === selectedDemoId) ?? null;
   const selectedPersona = personas.find((p) => p.id === selectedPersonaId) ?? null;
+  const hasReferenceIdentity = Boolean(selectedPersona || referenceImage);
   const activeCount = items.filter((item) => item.status === "queued" || item.status === "in_progress").length;
   const readyForRender = isRenderUnlocked(selectedHook);
   const historyItems = pendingHookPreview ? [pendingHookPreview, ...items] : items;
@@ -557,7 +573,7 @@ export function SoraStudio() {
     }
   });
 
-  async function refreshDemoLibrary(showSpinner = true) {
+  const refreshDemoLibrary = useCallback(async (showSpinner = true) => {
     if (showSpinner) {
       setLoadingDemos(true);
     }
@@ -573,9 +589,9 @@ export function SoraStudio() {
     } finally {
       setLoadingDemos(false);
     }
-  }
+  }, [t.studio.fetchDemosError]);
 
-  async function refreshPersonaLibrary(showSpinner = true) {
+  const refreshPersonaLibrary = useCallback(async (showSpinner = true) => {
     if (showSpinner) setLoadingPersonas(true);
     try {
       setPersonas(await requestPersonaLibrary());
@@ -585,7 +601,7 @@ export function SoraStudio() {
     } finally {
       setLoadingPersonas(false);
     }
-  }
+  }, [t.studio.fetchPersonasError]);
 
   function handlePickPersona(persona: Persona) {
     setSelectedPersonaId(persona.id);
@@ -696,11 +712,11 @@ export function SoraStudio() {
     }
 
     void refreshDemoLibrary(false);
-  }, [selectedStep]);
+  }, [refreshDemoLibrary, selectedStep]);
 
   useEffect(() => {
     void refreshPersonaLibrary(false);
-  }, []);
+  }, [refreshPersonaLibrary]);
 
   function handleImageChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0] ?? null;
@@ -715,23 +731,26 @@ export function SoraStudio() {
       return;
     }
 
+    if (!selectedPersonaId) {
+      setUseReferenceScene(false);
+    }
     setReferencePreviewUrl(null);
   }
 
-  function handlePresetSelect(nextPresetId: HookPresetId) {
-    const previousPreset = getHookPreset(hookPresetId);
-    const nextPreset = getHookPreset(nextPresetId);
+  function handleScenePresetSelect(nextPresetId: HookScenePresetId) {
+    const previousPreset = getHookScenePreset(scenePresetId);
+    const nextPreset = getHookScenePreset(nextPresetId);
 
-    setHookPresetId(nextPresetId);
+    setScenePresetId(nextPresetId);
 
-    if (isCustomHookPreset(nextPresetId)) {
+    if (isCustomHookScenePreset(nextPresetId)) {
       if (!sceneDescription.trim() || sceneDescription === previousPreset.sceneStarter) {
         setSceneDescription("");
       }
       return;
     }
 
-    if (!sceneDescription.trim() || sceneDescription === previousPreset.sceneStarter || isCustomHookPreset(hookPresetId)) {
+    if (!sceneDescription.trim() || sceneDescription === previousPreset.sceneStarter || isCustomHookScenePreset(scenePresetId)) {
       setSceneDescription(nextPreset.sceneStarter);
     }
   }
@@ -749,7 +768,7 @@ export function SoraStudio() {
       size: "720x1280",
       status: "in_progress" as const,
       progressPercent: 8,
-      inputMode: referenceImage ? "text_plus_image" as const : "text" as const,
+      inputMode: selectedPersonaId || referenceImage ? "text_plus_image" as const : "text" as const,
       inputImageUrl: undefined,
       inputImageOriginalName: referenceImage?.name,
       inputImageWidth: undefined,
@@ -819,7 +838,7 @@ export function SoraStudio() {
 
     try {
       const formData = new FormData();
-      const resolvedSceneDescription = isCustomPreset ? sceneDescription : selectedPreset.sceneStarter;
+      const resolvedSceneDescription = isCustomScenePreset ? sceneDescription : selectedScenePreset.sceneStarter;
       const optimisticHook = buildPendingHookPreview({
         spokenText,
         sceneDescription: resolvedSceneDescription,
@@ -827,9 +846,11 @@ export function SoraStudio() {
 
       setPendingHookPreview(optimisticHook);
 
-      formData.set("hookPresetId", hookPresetId);
+      formData.set("shotPresetId", shotPresetId);
+      formData.set("scenePresetId", scenePresetId);
       formData.set("spokenText", spokenText);
       formData.set("sceneDescription", resolvedSceneDescription);
+      formData.set("useReferenceScene", String(useReferenceScene));
       formData.set("model", model);
       formData.set("seconds", String(seconds));
 
@@ -866,12 +887,15 @@ export function SoraStudio() {
       }
 
       goToStep(1);
-      setHookPresetId(DEFAULT_HOOK_PRESET_ID);
+      setShotPresetId(DEFAULT_HOOK_SHOT_PRESET_ID);
+      setScenePresetId(DEFAULT_HOOK_SCENE_PRESET_ID);
       setSpokenText("");
       setTiktokUrl("");
       setTranscribeError(null);
-      setSceneDescription(getHookPreset(DEFAULT_HOOK_PRESET_ID).sceneStarter);
+      setSceneDescription(getDefaultSceneDescription(DEFAULT_HOOK_SCENE_PRESET_ID));
       setReferenceImage(null);
+      setUseReferenceScene(false);
+      setSelectedPersonaId(null);
       if (referencePreviewUrl) {
         URL.revokeObjectURL(referencePreviewUrl);
       }
@@ -1157,17 +1181,17 @@ export function SoraStudio() {
               {subStep === 0 ? (
                 <div className="substep-content">
                   <div className="field">
-                    <span>{t.studio.ugcShootingPreset}</span>
+                    <span>{t.studio.shotPresetLabel}</span>
                     <div className="preset-grid">
-                      {HOOK_PRESETS.map((preset) => {
-                        const isActive = preset.id === hookPresetId;
-                        const pi = presetI18n[preset.id];
+                      {HOOK_SHOT_PRESETS.filter((preset) => preset.id !== "custom").map((preset) => {
+                        const isActive = preset.id === shotPresetId;
+                        const pi = shotPresetI18n[preset.id];
 
                         return (
                           <button
                             className={`preset-card ${isActive ? "is-active" : ""}`}
                             key={preset.id}
-                            onClick={() => handlePresetSelect(preset.id)}
+                            onClick={() => setShotPresetId(preset.id)}
                             title={`${pi?.summary ?? preset.summary} ${pi?.context ?? preset.shootingContext}`}
                             type="button"
                           >
@@ -1184,7 +1208,79 @@ export function SoraStudio() {
                       })}
                     </div>
                   </div>
-                  <SubStepNav current={0} total={step1Subs.length} onPrev={() => setSubStep(0)} onNext={() => setSubStep(1)} />
+                  <div className="field">
+                    <span>{t.studio.scenePresetLabel}</span>
+                    <div className="preset-grid">
+                      {HOOK_SCENE_PRESETS.map((preset) => {
+                        const isActive = preset.id === scenePresetId;
+                        const pi = scenePresetI18n[preset.id];
+
+                        return (
+                          <button
+                            className={`preset-card ${isActive ? "is-active" : ""}`}
+                            key={preset.id}
+                            onClick={() => handleScenePresetSelect(preset.id)}
+                            title={`${pi?.summary ?? preset.summary} ${pi?.context ?? ""}`}
+                            type="button"
+                          >
+                            <div className="preset-card-head">
+                              <strong>{pi?.name ?? preset.name}</strong>
+                              <span className="badge badge-neutral">{pi?.badge ?? preset.badge}</span>
+                            </div>
+                            <div className="preset-tooltip" role="presentation">
+                              <p>{pi?.summary ?? preset.summary}</p>
+                              <small>{pi?.context ?? ""}</small>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {isCustomScenePreset ? (
+                    <label className="field">
+                      <span>{t.studio.customSceneLabel}</span>
+                      <textarea
+                        onChange={(event) => setSceneDescription(event.target.value)}
+                        placeholder={t.studio.customScenePlaceholder}
+                        rows={4}
+                        value={sceneDescription}
+                      />
+                      <small>{t.studio.customSceneHint}</small>
+                    </label>
+                  ) : null}
+
+                  <div className="field-grid">
+                    <label className="field">
+                      <span>{t.studio.modelLabel}</span>
+                      <select value={model} onChange={(event) => setModel(event.target.value as SoraModel)}>
+                        {MODEL_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                      <small>{MODEL_OPTIONS.find((option) => option.value === model)?.description}</small>
+                    </label>
+
+                    <label className="field">
+                      <span>{t.studio.durationLabel}</span>
+                      <select value={seconds} onChange={(event) => setSeconds(Number(event.target.value))}>
+                        {DURATION_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  <SubStepNav
+                    current={0}
+                    total={step1Subs.length}
+                    onPrev={() => setSubStep(0)}
+                    onNext={() => setSubStep(1)}
+                    nextDisabled={isCustomScenePreset && !sceneDescription.trim()}
+                  />
                 </div>
               ) : null}
 
@@ -1222,44 +1318,6 @@ export function SoraStudio() {
                       value={spokenText}
                     />
                   </label>
-
-                  {isCustomPreset ? (
-                    <label className="field">
-                      <span>{t.studio.customPreset}</span>
-                      <textarea
-                        onChange={(event) => setSceneDescription(event.target.value)}
-                        placeholder={t.studio.customPresetPlaceholder}
-                        rows={4}
-                        value={sceneDescription}
-                      />
-                      <small>{t.studio.customPresetHint}</small>
-                    </label>
-                  ) : null}
-
-                  <div className="field-grid">
-                    <label className="field">
-                      <span>{t.studio.modelLabel}</span>
-                      <select value={model} onChange={(event) => setModel(event.target.value as SoraModel)}>
-                        {MODEL_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                      <small>{MODEL_OPTIONS.find((option) => option.value === model)?.description}</small>
-                    </label>
-
-                    <label className="field">
-                      <span>{t.studio.durationLabel}</span>
-                      <select value={seconds} onChange={(event) => setSeconds(Number(event.target.value))}>
-                        {DURATION_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
                   <SubStepNav current={1} total={step1Subs.length} onPrev={() => setSubStep(0)} onNext={() => setSubStep(2)} nextDisabled={!spokenText.trim()} />
                 </div>
               ) : null}
@@ -1337,6 +1395,19 @@ export function SoraStudio() {
                     </label>
                   </div>
 
+                  <label className={`checkbox-card ${hasReferenceIdentity ? "" : "is-disabled"}`}>
+                    <input
+                      checked={useReferenceScene}
+                      disabled={!hasReferenceIdentity}
+                      onChange={(event) => setUseReferenceScene(event.target.checked)}
+                      type="checkbox"
+                    />
+                    <div>
+                      <strong>{t.studio.usePhotoAmbience}</strong>
+                      <small>{hasReferenceIdentity ? t.studio.usePhotoAmbienceHint : t.studio.usePhotoAmbienceDisabledHint}</small>
+                    </div>
+                  </label>
+
                   {showPersonaModal ? (
                     <div className="modal-backdrop" onClick={() => setShowPersonaModal(false)}>
                       <div className="modal-content" onClick={(event) => event.stopPropagation()}>
@@ -1408,8 +1479,12 @@ export function SoraStudio() {
 
                   <div className="substep-recap">
                     <div className="field static-field">
-                      <span>Preset</span>
-                      <strong>{presetI18n[selectedPreset.id]?.name ?? selectedPreset.name}</strong>
+                      <span>{t.studio.shotSummaryLabel}</span>
+                      <strong>{shotPresetI18n[selectedShotPreset.id]?.name ?? selectedShotPreset.name}</strong>
+                    </div>
+                    <div className="field static-field">
+                      <span>{t.studio.sceneSummaryLabel}</span>
+                      <strong>{scenePresetI18n[selectedScenePreset.id]?.name ?? selectedScenePreset.name}</strong>
                     </div>
                     <div className={`field static-field ${!spokenText.trim() ? "is-missing" : ""}`}>
                       <span>{t.studio.textLabel}</span>
@@ -1423,6 +1498,7 @@ export function SoraStudio() {
                     <div className="field static-field">
                       <span>{t.studio.personaOrPhoto}</span>
                       <strong>{selectedPersona ? selectedPersona.name : referenceImage ? referenceImage.name : t.studio.noneOptional}</strong>
+                      {hasReferenceIdentity && useReferenceScene ? <small>{t.studio.usePhotoAmbience}</small> : null}
                     </div>
                   </div>
 

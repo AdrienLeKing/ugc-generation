@@ -171,7 +171,9 @@ export type PreparedImage = {
 export type CreateGenerationInput = {
   spokenText: string;
   sceneDescription: string;
-  hookPresetId?: string;
+  shotPresetId?: string;
+  scenePresetId?: string;
+  useReferenceScene?: boolean;
   model: SoraModel;
   seconds: number;
   referenceImage?: PreparedImage;
