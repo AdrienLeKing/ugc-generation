@@ -119,6 +119,8 @@ const fr = {
     openaiNotConfigured: "OpenAI n'est pas configure",
     generatingHook: "Generation du hook...",
     generateHook: "Generer le hook",
+    generationCountLabel: "Variantes",
+    generationCountValue: (n: number) => `${n} hook${n > 1 ? "s" : ""}`,
     photoWithoutPersona: "Photo sans persona",
     referenceImageAlt: "Apercu de l'image de reference",
 
@@ -490,6 +492,8 @@ const en = {
     openaiNotConfigured: "OpenAI is not configured",
     generatingHook: "Generating hook...",
     generateHook: "Generate hook",
+    generationCountLabel: "Variants",
+    generationCountValue: (n: number) => `${n} hook${n > 1 ? "s" : ""}`,
     photoWithoutPersona: "Photo without persona",
     referenceImageAlt: "Reference image preview",
 

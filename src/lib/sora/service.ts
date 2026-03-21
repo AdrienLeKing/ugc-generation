@@ -6,6 +6,7 @@ import {
   DEFAULT_ELEVENLABS_MODEL,
   DEFAULT_ELEVENLABS_OUTPUT_FORMAT,
   DEFAULT_ELEVENLABS_VOICE_SETTINGS,
+  MAX_BATCH_SIZE,
   DEFAULT_MODEL,
   DEFAULT_SIZE,
   DURATION_OPTIONS,
@@ -220,6 +221,7 @@ export async function createGenerations(input: CreateGenerationInput & { userId?
   const sceneDescription = input.sceneDescription.trim();
   const model = input.model || DEFAULT_MODEL;
   const seconds = input.seconds || DEFAULT_DURATION_SECONDS;
+  const count = Math.min(Math.max(Math.trunc(input.count || 1), 1), MAX_BATCH_SIZE);
   const size = DEFAULT_SIZE;
   let referenceImage = input.referenceImage;
   const userId = input.userId;
@@ -264,7 +266,7 @@ export async function createGenerations(input: CreateGenerationInput & { userId?
     useReferenceScene,
   });
   const imageUrl = referenceImage ? await uploadImage(referenceImage.buffer, referenceImage.fileName) : undefined;
-  const baseRecord = {
+  const baseRecord = () => ({
     prompt,
     userId,
     spokenText,
@@ -295,22 +297,26 @@ export async function createGenerations(input: CreateGenerationInput & { userId?
     sourceVideoId: undefined,
     editPrompt: undefined,
     personaId,
-  };
-
-  const remoteJob = await createRemoteVideoJob({
-    prompt,
-    model,
-    seconds,
-    size,
-    referenceImage,
   });
 
-  const createdJobs = [
+  const remoteJobs = await Promise.all(
+    Array.from({ length: count }, () =>
+      createRemoteVideoJob({
+        prompt,
+        model,
+        seconds,
+        size,
+        referenceImage,
+      }),
+    ),
+  );
+
+  const createdJobs = remoteJobs.map((remoteJob) =>
     mapRemoteJobToRecord(remoteJob, {
       id: remoteJob.id,
-      ...baseRecord,
+      ...baseRecord(),
     }),
-  ];
+  );
   await upsertRecords(createdJobs);
   return createdJobs.toSorted((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
@@ -321,6 +327,7 @@ export async function createGenerationsFromFormData(formData: FormData, userId?:
   const shotPresetId = String(formData.get("shotPresetId") || "");
   const scenePresetId = String(formData.get("scenePresetId") || "");
   const useReferenceScene = String(formData.get("useReferenceScene") || "") === "true";
+  const count = Number(formData.get("count") || 1);
   const model = String(formData.get("model") || DEFAULT_MODEL);
   const seconds = Number(formData.get("seconds") || DEFAULT_DURATION_SECONDS);
   const maybeFile = formData.get("referenceImage");
@@ -337,6 +344,7 @@ export async function createGenerationsFromFormData(formData: FormData, userId?:
     shotPresetId,
     scenePresetId,
     useReferenceScene,
+    count,
     model: isSupportedModel(model) ? model : DEFAULT_MODEL,
     seconds,
     referenceImage,

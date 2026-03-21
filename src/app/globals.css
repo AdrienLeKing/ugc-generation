@@ -826,6 +826,35 @@ button {
   flex-wrap: wrap;
 }
 
+.inline-select {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  min-height: 52px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.inline-select span {
+  color: var(--text-soft);
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.inline-select select {
+  border: none;
+  background: transparent;
+  color: var(--text-main);
+  font: inherit;
+  padding-right: 8px;
+}
+
+.inline-select select:focus-visible {
+  outline: none;
+}
+
 .creation-counter {
   margin: -4px 0 0;
   color: var(--text-soft);
@@ -1236,8 +1265,11 @@ button {
   text-align: left;
   color: inherit;
   padding: 10px 12px;
-  cursor: pointer;
   transition: background 200ms ease, border-color 200ms ease;
+}
+
+.history-card-static {
+  cursor: default;
 }
 
 .history-card strong {

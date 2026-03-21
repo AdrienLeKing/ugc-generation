@@ -7,6 +7,7 @@ import {
   DEFAULT_DURATION_SECONDS,
   DEFAULT_MODEL,
   DURATION_OPTIONS,
+  HOOK_GENERATION_COUNT_OPTIONS,
   MODEL_OPTIONS,
 } from "@/lib/sora/config";
 import {
@@ -438,6 +439,7 @@ export function SoraStudio() {
   const [sceneDescription, setSceneDescription] = useState(getDefaultSceneDescription(DEFAULT_HOOK_SCENE_PRESET_ID));
   const [model, setModel] = useState<SoraModel>(DEFAULT_MODEL);
   const [seconds, setSeconds] = useState<number>(DEFAULT_DURATION_SECONDS);
+  const [generationCount, setGenerationCount] = useState<number>(1);
   const [referenceImage, setReferenceImage] = useState<File | null>(null);
   const [referencePreviewUrl, setReferencePreviewUrl] = useState<string | null>(null);
   const [useReferenceScene, setUseReferenceScene] = useState(false);
@@ -447,7 +449,7 @@ export function SoraStudio() {
   const [editDemoError, setEditDemoError] = useState<string | null>(null);
   const [finalizeError, setFinalizeError] = useState<string | null>(null);
   const [submittingHook, setSubmittingHook] = useState(false);
-  const [pendingHookPreview, setPendingHookPreview] = useState<GenerationRecord | null>(null);
+  const [pendingHookPreviews, setPendingHookPreviews] = useState<GenerationRecord[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingDemos, setLoadingDemos] = useState(false);
   const [creatingDemo, setCreatingDemo] = useState(false);
@@ -519,7 +521,7 @@ export function SoraStudio() {
   const hasReferenceIdentity = Boolean(selectedPersona || referenceImage);
   const activeCount = items.filter((item) => item.status === "queued" || item.status === "in_progress").length;
   const readyForRender = isRenderUnlocked(selectedHook);
-  const historyItems = pendingHookPreview ? [pendingHookPreview, ...items] : items;
+  const historyItems = pendingHookPreviews.length > 0 ? [...pendingHookPreviews, ...items] : items;
   const demoScriptFit = estimateDemoScriptFit(demoScript, selectedDemo?.durationSeconds, t);
 
   async function handleLogout() {
@@ -755,11 +757,11 @@ export function SoraStudio() {
     }
   }
 
-  function buildPendingHookPreview(input: { spokenText: string; sceneDescription: string }) {
+  function buildPendingHookPreview(input: { spokenText: string; sceneDescription: string; index: number }) {
     const now = new Date().toISOString();
 
     return {
-      id: `pending-${now}`,
+      id: `pending-${now}-${input.index}`,
       prompt: input.spokenText,
       spokenText: input.spokenText,
       sceneDescription: input.sceneDescription,
@@ -839,18 +841,22 @@ export function SoraStudio() {
     try {
       const formData = new FormData();
       const resolvedSceneDescription = isCustomScenePreset ? sceneDescription : selectedScenePreset.sceneStarter;
-      const optimisticHook = buildPendingHookPreview({
-        spokenText,
-        sceneDescription: resolvedSceneDescription,
-      });
+      const optimisticHooks = Array.from({ length: generationCount }, (_, index) =>
+        buildPendingHookPreview({
+          spokenText,
+          sceneDescription: resolvedSceneDescription,
+          index,
+        }),
+      );
 
-      setPendingHookPreview(optimisticHook);
+      setPendingHookPreviews(optimisticHooks);
 
       formData.set("shotPresetId", shotPresetId);
       formData.set("scenePresetId", scenePresetId);
       formData.set("spokenText", spokenText);
       formData.set("sceneDescription", resolvedSceneDescription);
       formData.set("useReferenceScene", String(useReferenceScene));
+      formData.set("count", String(generationCount));
       formData.set("model", model);
       formData.set("seconds", String(seconds));
 
@@ -878,7 +884,7 @@ export function SoraStudio() {
         setSelectedHookId(createdId);
       }
 
-      setPendingHookPreview(null);
+      setPendingHookPreviews([]);
       if (payload.items.length > 0) {
         setItems((current) => {
           const next = [...payload.items, ...current.filter((item) => !payload.items.some((created) => created.id === item.id))];
@@ -893,6 +899,7 @@ export function SoraStudio() {
       setTiktokUrl("");
       setTranscribeError(null);
       setSceneDescription(getDefaultSceneDescription(DEFAULT_HOOK_SCENE_PRESET_ID));
+      setGenerationCount(1);
       setReferenceImage(null);
       setUseReferenceScene(false);
       setSelectedPersonaId(null);
@@ -903,7 +910,7 @@ export function SoraStudio() {
 
       await refreshDashboard(false);
     } catch (error) {
-      setPendingHookPreview(null);
+      setPendingHookPreviews([]);
       setDashboardError(error instanceof Error ? error.message : "La generation du hook a echoue.");
     } finally {
       setSubmittingHook(false);
@@ -1514,6 +1521,16 @@ export function SoraStudio() {
                       <button className="secondary-button" onClick={() => setSubStep(2)} type="button">
                         Precedent
                       </button>
+                      <label className="inline-select">
+                        <span>{t.studio.generationCountLabel}</span>
+                        <select value={generationCount} onChange={(event) => setGenerationCount(Number(event.target.value))}>
+                          {HOOK_GENERATION_COUNT_OPTIONS.map((count) => (
+                            <option key={count} value={count}>
+                              {t.studio.generationCountValue(count)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
                       <button className="primary-button" disabled={submittingHook || !envReady || !spokenText.trim()} type="submit">
                         {submittingHook ? t.studio.generatingHook : t.studio.generateHook}
                       </button>
@@ -2040,6 +2057,28 @@ export function SoraStudio() {
                 const hookText = copyForHookCard(item);
                 const truncatedText = hookText.length > 60 ? `${hookText.slice(0, 60)}…` : hookText;
 
+                if (!isComplete) {
+                  return (
+                    <article className="history-card history-card-static" key={item.id}>
+                      <div className="history-card-head">
+                        <span className={`badge badge-${generationTone(item.status)}`}>
+                          {hookStatusLabels[item.status]}
+                        </span>
+                        <small className="history-card-time">{modelLabel(item.model)} · {item.seconds}s</small>
+                      </div>
+                      <strong>{truncatedText}</strong>
+                      {item.status === "queued" || item.status === "in_progress" ? (
+                        <div className="progress-rail compact-progress">
+                          <div
+                            className="progress-bar"
+                            style={{ width: `${Math.max(item.progressPercent, isPending ? 8 : 4)}%` }}
+                          />
+                        </div>
+                      ) : null}
+                    </article>
+                  );
+                }
+
                 return (
                   <details
                     className="history-card collapsible-card"
@@ -2056,9 +2095,6 @@ export function SoraStudio() {
                     </summary>
 
                     <div className="history-card-body">
-                      <strong>{hookText}</strong>
-                      <p>{item.sceneDescription ?? t.studio.noSceneDesc}</p>
-
                       {item.videoUrl ? (
                         <InlineVideoPreview
                           className="history-video"
@@ -2067,19 +2103,8 @@ export function SoraStudio() {
                         />
                       ) : null}
 
-                      {item.videoUrl ? null : (
-                        <div className="progress-rail compact-progress">
-                          <div
-                            className="progress-bar"
-                            style={{ width: `${Math.max(item.progressPercent, isComplete ? 100 : 8)}%` }}
-                          />
-                        </div>
-                      )}
-
                       <div className="history-card-actions">
-                        {isPending ? (
-                          <span className="badge badge-neutral">{t.common.processing}</span>
-                        ) : isComplete ? (
+                        {isComplete ? (
                           <button
                             className="primary-button compact-button"
                             onClick={(event) => {

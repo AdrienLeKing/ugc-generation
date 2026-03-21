@@ -174,6 +174,7 @@ export type CreateGenerationInput = {
   shotPresetId?: string;
   scenePresetId?: string;
   useReferenceScene?: boolean;
+  count?: number;
   model: SoraModel;
   seconds: number;
   referenceImage?: PreparedImage;

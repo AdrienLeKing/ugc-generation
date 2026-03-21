@@ -5,6 +5,8 @@ export const POLL_INTERVAL_MS = 10_000;
 export const DEFAULT_MODEL: SoraModel = "sora-2";
 export const DEFAULT_DURATION_SECONDS = 4;
 export const DEFAULT_SIZE: VerticalSize = "720x1280";
+export const MAX_BATCH_SIZE = 4;
+export const HOOK_GENERATION_COUNT_OPTIONS = [1, 2, 3, 4] as const;
 
 export const MODEL_OPTIONS: Array<{
   value: SoraModel;
